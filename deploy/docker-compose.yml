@@ -1,0 +1,47 @@
+name: uptimemesh
+
+services:
+  # 存储改为 SQLite 单文件(ADR-0005):不再需要独立数据库容器,
+  # 数据落在命名卷 uptimemesh-data 的 /data/uptimemesh.db。
+  dashboard:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.dashboard
+      args:
+        # 节点版本号:写进分发的 Agent 二进制与安装包目录的 VERSION 文件,
+        # 节点页据此判断「一键升级」。发新版本时改这里(或 AGENT_VERSION=… 覆盖)。
+        AGENT_VERSION: ${AGENT_VERSION:-0.1.9}
+    container_name: uptimemesh-dashboard
+    restart: unless-stopped
+    environment:
+      # 时区 +8。镜像里已装 tzdata 并内置 /etc/localtime(见 Dockerfile.dashboard),
+      # 不写这行也是 +8;这里显式写出,方便临时改成别的时区。
+      # 注意:换成 Asia/Shanghai 之外的时区不需要重建镜像(tzdata 里有全量 zoneinfo)。
+      TZ: Asia/Shanghai
+      SQLITE_PATH: /data/uptimemesh.db
+      SERVER_PORT: "8000"
+      # 地域库:镜像已内置 GeoLite2-Country.mmdb(构建时下载,见 Dockerfile.dashboard),
+      # 这里保持默认即可。要用自己准备的库(官方 MaxMind / City 版)时改这个路径。
+      GEOIP_DB_PATH: ${GEOIP_DB_PATH:-/app/geoip/GeoLite2-Country.mmdb}
+    volumes:
+      - uptimemesh-data:/data
+      # 曾经这里挂载宿主机的 /etc/localtime。已删除,原因有两个:
+      # 1) 它会把镜像内置的 /etc/localtime 盖掉,容器时区退化成「跟着宿主机走」;
+      # 2) 在 Docker Desktop(Windows/macOS)上,那台 Linux VM 里的 /etc/localtime
+      #    根本不存在(实测 cat 报 No such file),挂进来的是 UTC —— 于是服务端代码里
+      #    time.Now() 出来的「本地时间」全是 UTC,和宿主机 +8 差 8 小时。
+      # 时区现在由镜像保证,不再依赖宿主机。
+      # 可选:用宿主上的 .mmdb 覆盖镜像内置的地域库(GeoIP 数据每周更新,这样可以
+      # 不重建镜像就换库)。先跑 `sh deploy/fetch-geoip.sh` 再取消下面这行注释 ——
+      # 挂载点与 GEOIP_DB_PATH 一致,不需要额外改环境变量。
+      # - ./geoip/GeoLite2-Country.mmdb:/app/geoip/GeoLite2-Country.mmdb:ro
+    ports:
+      - "5678:8000"
+    deploy:
+      resources:
+        limits:
+          memory: 512m
+
+volumes:
+  uptimemesh-data:
+  uptimemesh-agent-cred:

@@ -1,0 +1,26 @@
+bin/
+dist/
+node_modules/
+*.exe
+.data/
+web/dist/
+# embed 目录默认忽略,但保留占位 index.html 保证 go:embed 编译种子存在
+dashboard/internal/webdist/dist/
+!dashboard/internal/webdist/dist/index.html
+agent/.credentials/
+*.log
+
+deploy/.env
+# 地域库(.mmdb,~8.5MB):由 deploy/fetch-geoip.sh 下载或构建镜像时获取,不入库
+deploy/geoip/
+# SQLite 数据文件(本地运行 dashboard 时默认落在 manifest/data 或工作目录 data/)
+data/
+dashboard/manifest/data/
+# 数据搬迁备份(旧 Mongo 卷冷备、迁移前快照),体积大且不入库
+.backup/
+# 开发过程台账(工单、规格草稿、排查快照、验证脚本):属于本地开发过程,不随产品源码入库
+.scratch/
+# 测试代码不入库:仅保留在本地开发环境,不随发布分支/开源仓库分发
+*_test.go
+dashboard/internal/testutil/
+dashboard/internal/geoip/geoiptest/

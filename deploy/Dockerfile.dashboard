@@ -1,0 +1,123 @@
+# 构建上下文为仓库根目录(docker-compose 已配置 context: ..)
+
+# 前端构建:在镜像内跑 vite,产物随后覆盖 go:embed 目录,
+# 使 `docker compose build` 总能带上最新前端(避免手拷 web/dist 遗漏)。
+FROM node:22-alpine AS web
+WORKDIR /web
+COPY web/package.json web/package-lock.json ./
+# npm 的下载缓存默认落在 /root/.npm,会被固化成镜像层的一部分:package-lock 一变
+# 就是一份新的 ~78MB 快照(实测堆了 5 份)。挂成 cache mount 后它只留在构建缓存里。
+RUN --mount=type=cache,target=/root/.npm \
+    npm ci
+COPY web ./
+RUN npm run build
+
+FROM golang:1.27-alpine AS agentbuild
+# 依赖下载全程走国内源:goproxy.cn 为主,腾讯云兜底,direct 只作最后手段。
+# 分隔符是 `|` 不是 `,`:逗号只在 404/410 时回退,主源宕机(连接被拒/超时)会直接失败,
+# 兜底形同虚设;`|` 才在任意错误时回退。最后的 `,direct` 仍用逗号,
+# 这样只有两个镜像都确认没有该模块时才去访问 GitHub(避免网络抖动时卡在直连)。
+# 实测(23MB 的 modernc.org/sqlite zip):goproxy.cn ~15MB/s、腾讯云 ~28MB/s;
+# 阿里云 goproxy 极慢(~0.4MB/s),不要加进来。
+ARG GOPROXY=https://goproxy.cn|https://mirrors.tencent.com/go,direct
+# AGENT_VERSION 是节点版本号:打进二进制,同时写进 /out/VERSION 供仪表盘判断
+# 节点是否需要「一键升级」。发布新版本时用 --build-arg(compose 里见 AGENT_VERSION)。
+ARG AGENT_VERSION=0.1.0
+ENV GOPROXY=${GOPROXY}
+WORKDIR /src
+# 保持 shared 与 agent 的相对位置:agent/go.mod 以 replace 指向 ../shared。
+COPY shared ./shared
+COPY agent ./agent
+# 交叉编译节点二进制,供「复制安装代码」的一键安装按架构下载。
+# 同样要挂 cache mount,理由见下面 build 阶段的说明(不挂的话每次构建都在 VHDX 里
+# 多留一份模块 + 编译缓存,实测这一阶段堆了 2.6GB)。
+RUN --mount=type=cache,target=/go/pkg/mod \
+    --mount=type=cache,target=/root/.cache/go-build \
+    cd agent && go mod tidy \
+ && for arch in amd64 arm64; do \
+      CGO_ENABLED=0 GOOS=linux GOARCH=$arch \
+        go build -trimpath \
+        -ldflags "-s -w -X github.com/uptimemesh/shared/agentclient.Version=$AGENT_VERSION" \
+        -o /out/uptimemesh-agent-linux-$arch ./cmd; \
+    done \
+ && printf '%s\n' "$AGENT_VERSION" > /out/VERSION
+
+FROM golang:1.27-alpine AS build
+# 依赖下载全程走国内源:goproxy.cn 为主,腾讯云兜底,direct 只作最后手段。
+# 分隔符是 `|` 不是 `,`:逗号只在 404/410 时回退,主源宕机(连接被拒/超时)会直接失败,
+# 兜底形同虚设;`|` 才在任意错误时回退。最后的 `,direct` 仍用逗号,
+# 这样只有两个镜像都确认没有该模块时才去访问 GitHub(避免网络抖动时卡在直连)。
+# 实测(23MB 的 modernc.org/sqlite zip):goproxy.cn ~15MB/s、腾讯云 ~28MB/s;
+# 阿里云 goproxy 极慢(~0.4MB/s),不要加进来。
+ARG GOPROXY=https://goproxy.cn|https://mirrors.tencent.com/go,direct
+ENV GOPROXY=${GOPROXY}
+WORKDIR /src
+COPY shared ./shared
+COPY dashboard ./dashboard
+# 丢弃源码里可能过期/缺失的 dist,改用本镜像构建的前端产物。
+RUN rm -rf /src/dashboard/internal/webdist/dist
+COPY --from=web /web/dist /src/dashboard/internal/webdist/dist
+WORKDIR /src/dashboard
+# --mount=type=cache 是控制 docker_data.vhdx 膨胀的关键。go 的模块缓存(/go/pkg/mod)
+# 与编译缓存(/root/.cache/go-build)默认写在容器文件系统里,会被固化成镜像层的一部分;
+# 这两处合计约 1.1GB,而且**源码一改层哈希就变**,BuildKit 无法复用上一份,只能整份重存。
+# 实测 16 次构建就这样在 VHDX 里堆了 18GB,把 docker_data.vhdx 撑到 34GB、C 盘只剩 1.5GB。
+# 挂成 cache mount 后它们只存在于构建缓存中:不进层、可跨构建复用,prune 一次即可清空。
+# 注意:RUN --mount 需要 BuildKit(Docker Desktop 默认开启);DOCKER_BUILDKIT=0 会直接报语法错。
+RUN --mount=type=cache,target=/go/pkg/mod \
+    --mount=type=cache,target=/root/.cache/go-build \
+    go mod tidy && CGO_ENABLED=0 go build -trimpath -o /out/uptimemesh-dashboard ./cmd
+
+FROM alpine:3.20 AS geoip
+# 地域库(GeoLite2-Country,约 8.5MB):节点页按来源 IP 自动解析国家/地区全靠它,
+# 没有它 GEOIP_DB_PATH 落空,节点地域只能手动指定(历史线上问题)。
+#
+# 官方 MaxMind 的下载地址需要注册账号换许可密钥,这里改用公开镜像
+# P3TERX/GeoLite.mmdb 的每日构建产物(免注册、每天更新,URL 里的 latest 由
+# GitHub 重定向到当天 tag)。要换成官方库或内网镜像:
+#   docker compose build --build-arg GEOIP_MMDB_URL=<.mmdb 直链> dashboard
+# 也可以完全绕开构建:把 .mmdb 放到宿主上再挂载,见 deploy/fetch-geoip.sh。
+#
+# 下载失败就让构建失败:静默降级成"没有地域库"正是这个功能此前一直不工作的原因,
+# 宁可构建时报错,也不要再产出一个地域永远显示「未知」的镜像。
+ARG GEOIP_MMDB_URL=https://github.com/P3TERX/GeoLite.mmdb/releases/latest/download/GeoLite2-Country.mmdb
+RUN apk add --no-cache curl \
+ && mkdir -p /geoip \
+ && curl -fsSL --retry 3 --retry-delay 2 --retry-all-errors --max-time 600 \
+      -o /geoip/GeoLite2-Country.mmdb "$GEOIP_MMDB_URL" \
+ && test -s /geoip/GeoLite2-Country.mmdb
+
+FROM alpine:3.20
+# 时区固定为 +8(Asia/Shanghai),这是容器的默认值,不依赖宿主机。
+#
+# 必须装 tzdata:alpine 基础镜像里没有 /usr/share/zoneinfo。此时 `TZ=Asia/Shanghai`
+# 是**静默失效**的 —— Go 的 initLocal() 解析不到该时区名就回落到 UTC,busybox 的
+# date 也一样,而 TZ 一旦设置,/etc/localtime 反而被完全忽略。线上表现就是容器内
+# 日志、通知时间戳、图表刻度统一差 8 小时(TZ 设了、看起来配了,实际是 UTC)。
+# 所以 tzdata 不能装完就删:删了 TZ=Asia/Shanghai 立刻又变回 UTC。
+#
+# 同时把 /etc/localtime 与 /etc/timezone 写进镜像:即使外部完全不给 TZ 环境变量,
+# 容器也默认走 +8(删掉这两行,结果就取决于宿主机的挂载了)。
+# 注意 TZ 的三种状态(实测,Go 与 busybox 同口径):不给 = 读 /etc/localtime(+8);
+# TZ=Asia/Shanghai = 查 zoneinfo(+8);**TZ=(空串) = UTC** —— 空的 TZ 按 POSIX 就是
+# UTC,会反过来把 /etc/localtime 覆盖掉,别把 TZ 设成空值。
+# 想换时区:改下面两处 cp/echo,或直接覆盖 TZ 环境变量(镜像里已带全部 zoneinfo)。
+RUN apk add --no-cache tzdata \
+ && cp /usr/share/zoneinfo/Asia/Shanghai /etc/localtime \
+ && echo "Asia/Shanghai" > /etc/timezone
+ENV TZ=Asia/Shanghai
+RUN addgroup -S uptm && adduser -S uptm -G uptm
+WORKDIR /app
+COPY --from=build /out/uptimemesh-dashboard /app/uptimemesh-dashboard
+COPY --from=agentbuild /out /app/agents
+COPY --from=geoip /geoip /app/geoip
+COPY dashboard/manifest /app/manifest
+# SQLite 数据库目录:容器以非 root 运行,命名卷挂载后需保证可写。
+RUN mkdir -p /data && chown -R uptm:uptm /data
+ENV AGENT_DIST_DIR=/app/agents
+ENV SQLITE_PATH=/data/uptimemesh.db
+# 内置地域库路径;想用自己的库(如已注册 MaxMind)就覆盖这个环境变量并挂载文件。
+ENV GEOIP_DB_PATH=/app/geoip/GeoLite2-Country.mmdb
+USER uptm
+EXPOSE 8000
+CMD ["/app/uptimemesh-dashboard"]

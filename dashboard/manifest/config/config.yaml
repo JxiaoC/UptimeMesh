@@ -1,0 +1,13 @@
+server:
+  port: 8000
+  # 请求体上限:默认 8MB,而配置文件导入是「整份 JSON 一次提交」(数百个监控、
+  # 带请求头/请求体时可能几 MB),故放到 32MB。超限时接口返回「配置文件过大」。
+  clientMaxBodySize: 33554432
+
+# SQLite 单文件存储(ADR-0005);路径相对进程工作目录,容器内由 SQLITE_PATH 覆盖。
+sqlite:
+  path: "data/uptimemesh.db"
+
+logger:
+  level: "all"
+  stdout: true

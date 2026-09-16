@@ -1,0 +1,11 @@
+# 构建上下文裁剪:避免把 node_modules/.git 等送进 daemon,
+# 同时防止 host 的 node_modules 覆盖镜像内 npm ci 的结果。
+.git
+**/node_modules
+web/dist
+# 前端在镜像内构建后写入;源码里的这份可能过期,排除出上下文。
+dashboard/internal/webdist/dist
+bin
+.data
+*.log
+deploy/.env

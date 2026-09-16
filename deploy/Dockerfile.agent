@@ -1,0 +1,39 @@
+# 构建上下文为仓库根目录(docker-compose 已配置 context: ..)
+FROM golang:1.27-alpine AS build
+# 与 Dockerfile.dashboard 同一口径:国内源优先,腾讯云兜底,direct 最后。
+# 注意主源与兜底之间用 `|`(任意错误都回退),不是 `,`(仅 404/410 回退)。
+ARG GOPROXY=https://goproxy.cn|https://mirrors.tencent.com/go,direct
+# 与 dashboard 镜像同一个版本号口径,便于示例节点的版本与分发包保持一致。
+ARG AGENT_VERSION=0.1.0
+ENV GOPROXY=${GOPROXY}
+WORKDIR /src
+COPY shared ./shared
+COPY agent ./agent
+WORKDIR /src/agent
+RUN go mod tidy && CGO_ENABLED=0 go build -trimpath \
+    -ldflags "-X github.com/uptimemesh/shared/agentclient.Version=$AGENT_VERSION" \
+    -o /out/uptimemesh-agent ./cmd
+
+FROM alpine:3.20
+# 时区 +8,与 dashboard 镜像同一口径(原因见 Dockerfile.dashboard:alpine 不装 tzdata 时
+# TZ=Asia/Shanghai 会静默回落到 UTC)。节点日志的时间戳走 agent/cmd/time.go 的
+# time.Now(),容器里不修就是 UTC,和宿主差 8 小时。
+#
+# 这里只改运行阶段(基础镜像/时区数据),**不碰构建阶段的 Go 编译**,
+# agent 二进制与它的 Version 字符串都不变,因此不需要 bump AGENT_VERSION
+# (AGENT_VERSION 是给节点页判断「可升级/需重装」用的,只有二进制变化才该动)。
+RUN apk add --no-cache tzdata \
+ && cp /usr/share/zoneinfo/Asia/Shanghai /etc/localtime \
+ && echo "Asia/Shanghai" > /etc/timezone
+ENV TZ=Asia/Shanghai
+RUN addgroup -S uptm && adduser -S uptm -G uptm \
+ && mkdir -p /data && chown uptm:uptm /data
+WORKDIR /app
+COPY --from=build /out/uptimemesh-agent /app/uptimemesh-agent
+# 二进制归运行用户所有:节点页的「一键升级」要往 /app 写临时文件并覆盖它,
+# root 属主会让容器内节点升级失败(重建容器仍会回到镜像内的版本)。
+RUN chown uptm:uptm /app/uptimemesh-agent
+USER uptm
+VOLUME /data
+# 运行需 NET_RAW(见 compose),凭据持久化在 /data 卷。
+ENTRYPOINT ["/app/uptimemesh-agent"]
