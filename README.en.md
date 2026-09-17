@@ -1,5 +1,13 @@
 # UptimeMesh
 
+<div align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)"
+            srcset="docs/logo/uptimemesh-logo-horizontal-inverse.svg">
+    <img alt="UptimeMesh" src="docs/logo/uptimemesh-logo-horizontal.svg" width="520" height="142">
+  </picture>
+</div>
+
 **A distributed active monitoring system** — the Dashboard only stores configuration, schedules probe rounds and aggregates results; **every check runs on Agents (nodes) deployed wherever you need them**.
 
 [中文](README.md) | **English**
@@ -210,7 +218,7 @@ agent/            node process (connect, probe, report, credential persistence, 
 shared/           protocol and probe implementations (shared by agent and dashboard)
 web/              Vue 3 + Vite + TS + Element Plus + ECharts frontend
 deploy/           docker-compose, Dockerfiles, build-agent.sh, bump-agent-version.sh, .env.example
-docs/             adr/ (decision records), protocol.md (WS frame contract), agents/ (collaboration guides)
+docs/             adr/ (decision records), protocol.md (WS frame contract), logo/ (brand assets), agents/ (collaboration guides)
 ```
 
 ## Documentation and contributing
@@ -221,6 +229,29 @@ docs/             adr/ (decision records), protocol.md (WS frame contract), agen
 - Collaboration conventions (issues, labels, layout, commit rules): [`AGENTS.md`](AGENTS.md), [`docs/agents/`](docs/agents/) (Chinese)
 - Every new user-facing string in the frontend must be internationalized (`web/src/i18n/`; Chinese and English entries must be changed together).
 - Any change affecting the Agent binary (Go code under `agent/` or `shared/`, or how it is built) requires bumping the agent revision.
+
+## Brand assets
+
+Every logo file is generated from one shared set of geometry and colour values, so the SVG and the PNG can never drift apart — change a number and re-run:
+
+```bash
+python docs/logo/generate_logo.py            # regenerate everything
+python docs/logo/generate_logo.py --check    # design self-check (contrast, small-size legibility, lockup balance, SVG validity)
+```
+
+| Use | Files |
+|---|---|
+| README / docs lockup (light + dark) | `docs/logo/uptimemesh-logo-horizontal{,-inverse}.svg` |
+| Bare mark (works on light and dark) | `docs/logo/uptimemesh-mark.svg`, `uptimemesh-mark-on-dark.svg` |
+| Avatar / app icon (rounded plate) | `docs/logo/uptimemesh-mark-badge.svg`, `uptimemesh-icon-{512,256,128,64,48,32,24,16}.png` |
+| Favicon | `docs/logo/uptimemesh-favicon.ico` (16/24/32/48 frames) |
+| Social card | `docs/logo/uptimemesh-og-banner.png` (1584×704) |
+| Delivery sheet (review) | `docs/logo/uptimemesh-brand-sheet.png` |
+
+- **Meaning**: the hexagon is the mesh of nodes spread across networks, the centre is the Dashboard, the ECG trace running through it is active probing (Uptime), and the amber node at the lower right is one that is alerting.
+- **Palette shared with the UI**: brand blue `#2D7FF9` distilled from the Element Plus primary `#409eff`; online green `#3DDC84` and alert amber `#F5A623` mirror the up / breach status colours.
+- **Small sizes use their own geometry**: full detail ≥128 px, simplified 33–127 px (thicker strokes, no hairline diagonals), minimal ≤32 px — scaling the large mark down makes the white hub dot and thin lines disappear under antialiasing.
+- Rationale and usage rules: [`docs/logo/README.md`](docs/logo/README.md) (Chinese).
 
 ---
 

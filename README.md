@@ -1,5 +1,13 @@
 # UptimeMesh
 
+<div align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)"
+            srcset="docs/logo/uptimemesh-logo-horizontal-inverse.svg">
+    <img alt="UptimeMesh" src="docs/logo/uptimemesh-logo-horizontal.svg" width="520" height="142">
+  </picture>
+</div>
+
 **分布式主动监控系统** —— Dashboard 只负责配置、调度与汇总，检测全部由分布在各处的 Agent（节点）执行。
 
 **中文** | [English](README.en.md)
@@ -208,7 +216,7 @@ agent/            节点进程（连接、执行探测、回传、凭据持久�
 shared/           协议与探测实现（agent 与 dashboard 共用）
 web/              Vue 3 + Vite + TS + Element Plus + ECharts 前端
 deploy/           docker-compose、Dockerfile、build-agent.sh、bump-agent-version.sh、.env.example
-docs/             adr/（架构决策）、protocol.md（WS 帧契约）、agents/（协作指南）
+docs/             adr/（架构决策）、protocol.md（WS 帧契约）、logo/（品牌标识）、agents/（协作指南）
 ```
 
 ## 文档与贡献
@@ -219,6 +227,29 @@ docs/             adr/（架构决策）、protocol.md（WS 帧契约）、agent
 - 协作约定（工单、标签、目录与提交规范）：[`AGENTS.md`](AGENTS.md)、[`docs/agents/`](docs/agents/)
 - 前端新增任何面向用户的文本都必须国际化（`web/src/i18n/`，中英词条必须同时修改）。
 - 任何影响 Agent 二进制的改动（`agent/`、`shared/` 的 Go 代码及构建方式）都要让版本修订号 +1。
+
+## 品牌标识
+
+Logo 全部由脚本从同一套几何 + 色板生成，改数值重跑即可，SVG 与 PNG 永不走偏：
+
+```bash
+python docs/logo/generate_logo.py            # 重新生成全部产物
+python docs/logo/generate_logo.py --check    # 设计自检（对比度 / 小尺寸可读性 / 版式平衡 / SVG 合法性）
+```
+
+| 用途 | 文件 |
+|---|---|
+| README / 文档主锁定版（浅底、深底各一） | `docs/logo/uptimemesh-logo-horizontal{,-inverse}.svg` |
+| 图形（无底板，深浅底通用） | `docs/logo/uptimemesh-mark.svg`、`uptimemesh-mark-on-dark.svg` |
+| 头像 / 应用图标（带圆角底板） | `docs/logo/uptimemesh-mark-badge.svg`、`uptimemesh-icon-{512,256,128,64,48,32,24,16}.png` |
+| favicon | `docs/logo/uptimemesh-favicon.ico`（16/24/32/48 多帧） |
+| 社交分享图 | `docs/logo/uptimemesh-og-banner.png`（1584×704） |
+| 交付总览（验收用） | `docs/logo/uptimemesh-brand-sheet.png` |
+
+- **含义**：六边形是分散在各处的节点网格（Mesh），中心是 Dashboard，横贯的心电线是主动探测（Uptime），右下那颗琥珀色节点表示「正在报警」。
+- **色板与仪表盘同源**：品牌蓝 `#2D7FF9` 提炼自 Element Plus primary `#409eff`，在线绿 `#3DDC84` 与报警琥珀 `#F5A623` 对应状态色 up / breach。
+- **小尺寸另有专用几何**：≥128px 用完整版，33~127px 用简化版（加粗线条、去掉对角细线），≤32px 用极限版——直接缩大图会让中心白点与细线在抗锯齿下消失。
+- 设计口径与使用规范见 [`docs/logo/README.md`](docs/logo/README.md)。
 
 ---
 
