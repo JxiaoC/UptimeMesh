@@ -73,6 +73,19 @@ const isDownload = computed(() => monitor.value?.type === 'download')
 // 这里不再需要 isPush —— 面板正文只关心"下载速度"这一种口径差异。
 const speedUnit = computed<string>(() => monitor.value?.speedUnit || 'KB/s')
 
+// 趋势图上的阈值虚线:取监控配置里的阈值,单位与主曲线一致 ——
+// 可用率监控是 %(阈值本身就是 0~100),下载速度监控是监控配置的单位
+// (阈值存储单位即 SpeedUnit,主曲线的刻度也按它换算)。所以这里原样传,不做换算。
+//
+// push 监控不传:它的阈值是后端恒定的 PushThreshold,表单里也没有这一项,
+// 每轮成功率非 0% 即 100%,画一条 100% 的线既无信息量也贴着网格顶边。传 null 不画。
+const chartThreshold = computed<number | null>(() => {
+  const m = monitor.value
+  if (!m || m.type === 'push') return null
+  const v = Number(m.threshold)
+  return Number.isFinite(v) ? v : null
+})
+
 // 颗粒度下限:跨度 ≤24 小时 ⇒ 1 分钟;24 小时~3 天 ⇒ 30 分钟;更长 ⇒ 1 小时。
 function minBucketOf(span: number): number {
   if (span <= DAY_SEC) return 60
@@ -312,8 +325,15 @@ function stateTag(r: TimelineRow) {
       </el-col>
     </el-row>
     <el-card shadow="never" style="margin-bottom:20px">
-      <!-- 下载速度监控:第一条曲线画速度(独立轴、单位随监控配置)而不是可用率。 -->
-      <TrendChart :data="stats" :agents="agentSeries" :metric="isDownload ? 'speed' : 'rate'" :speed-unit="speedUnit" />
+      <!-- 下载速度监控:第一条曲线画速度(独立轴、单位随监控配置)而不是可用率。
+           :threshold 画一条阈值虚线,口径与第一条曲线相同(见 chartThreshold)。 -->
+      <TrendChart
+        :data="stats"
+        :agents="agentSeries"
+        :metric="isDownload ? 'speed' : 'rate'"
+        :speed-unit="speedUnit"
+        :threshold="chartThreshold"
+      />
     </el-card>
 
     <!-- 两块表各占一半、同一行并排(弹窗与独立页同口径):轮次时间线在左,

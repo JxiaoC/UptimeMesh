@@ -67,6 +67,7 @@ const detail: typeof zhDetail = {
     axisLatency: 'Latency (ms)',
     speed: 'Download speed',
     axisSpeed: 'Speed',
+    threshold: 'Threshold',
   },
 }
 
