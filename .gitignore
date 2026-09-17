@@ -4,6 +4,7 @@ node_modules/
 *.exe
 .data/
 web/dist/
+docs
 # embed 目录默认忽略,但保留占位 index.html 保证 go:embed 编译种子存在
 dashboard/internal/webdist/dist/
 !dashboard/internal/webdist/dist/index.html
