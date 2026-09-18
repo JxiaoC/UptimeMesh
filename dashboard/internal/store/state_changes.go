@@ -140,3 +140,17 @@ func (s *Store) DeleteStateChangesByMonitors(ctx context.Context, ids []ID) erro
 		idArgs(ids)...)
 	return normalizeErr(err)
 }
+
+// PruneOldStateChanges 删除 cutoff 之前的状态变动记录(changed_at 口径)。
+// 变动记录按 RoundID 关联回 rounds 取展示明细(rounds.go 的 listMonitorStateChanges
+// 会静默跳过查不到的轮次),轮次纳入保留期后,被清轮次引用的变动记录就成了永远
+// 渲染不出来的孤儿行 —— 跟随同一条保留期清理,维持"变动记录都能配到轮次"的不变量。
+// 表量级很小(只在状态翻转时写),单条 DELETE 不分批。返回删除条数。
+func (s *Store) PruneOldStateChanges(ctx context.Context, cutoff time.Time) (int64, error) {
+	res, err := s.db.ExecContext(ctx,
+		`DELETE FROM monitor_state_changes WHERE changed_at < ?`, unixSec(cutoff))
+	if err != nil {
+		return 0, normalizeErr(err)
+	}
+	return res.RowsAffected()
+}

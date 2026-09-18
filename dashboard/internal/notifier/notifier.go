@@ -43,6 +43,9 @@ type Payload struct {
 	// {{errorCount}} 同源(见 countDownAlerts):DOWN 事件里含本条监控,UP 事件里是恢复后
 	// 剩下的那些。统计失败时为 0(模板变量此时渲染成空)。
 	ErrorCount int `json:"errorCount"`
+	// DurationSec 是本次报警的持续秒数:仅恢复(UP)事件有值(见 alert.Event.DurationSec);
+	// 模板变量 {{duration}} 是它的可读文本形式。0 = 无可配对的报错记录。
+	DurationSec int64 `json:"durationSec,omitempty"`
 	// Nodes 是触发事件那一轮的节点明细(每个被指派节点一条):接收端不必再回查
 	// Dashboard 就知道"是谁挂了、谁没回结果"。
 	Nodes     []NodeStatus `json:"nodes,omitempty"`
@@ -121,6 +124,7 @@ func (n *Notifier) EmitMonitorEvent(ctx context.Context, m *store.Monitor, ev al
 		Speed:       speedText,
 		Agents:      renderNodes(nodes, m.Type, m.SpeedUnit),
 		ErrorCount:  errorCountText,
+		Duration:    durationText(ev.DurationSec),
 		Timestamp:   ts,
 	}
 	rendered := notifytmpl.Render(n.template(ctx, ev.Type, m.Type), vars)
@@ -129,7 +133,7 @@ func (n *Notifier) EmitMonitorEvent(ctx context.Context, m *store.Monitor, ev al
 		MonitorID: m.ID.Hex(), MonitorName: m.Name,
 		MonitorType: m.Type, URL: urlOf(m),
 		SuccessRate: ev.SuccessRate, SpeedKbps: speedKbps, SpeedUnit: m.SpeedUnit,
-		ErrorCount: errorCount, Nodes: nodes, Timestamp: ts,
+		ErrorCount: errorCount, DurationSec: ev.DurationSec, Nodes: nodes, Timestamp: ts,
 	}
 	selected := n.st.FindChannelsByIDs(ctx, m.ChannelIds)
 	active := enabledChannels(selected)
@@ -298,6 +302,26 @@ func speedVars(m *store.Monitor, ev alert.Event) (kbps float64, text string) {
 	return ev.Value, fmt.Sprintf("%.2f %s", checkconfig.FromKbps(ev.Value, unit), unit)
 }
 
+// durationText 把报警持续秒数渲染成 {{duration}} 的展示文本(恒为中文,见 AGENTS.md
+// 「国际化」:后端返回的文案不随界面语言变)。口径与 scheduler.push.go 的 humanSeconds
+// 一致(秒/分秒/时分),但没有天数档:恢复通知要贴着"最近一次故障"读,
+// 超过一天时「x 小时 y 分」仍可辨认,再拖长就该翻变动记录看时点了。
+// 0 = 没有可配对的 DOWN 记录(DOWN/TEST 事件同此),返回空串 —— 模板里渲染成空,
+// 不残留花括号也不冒充「0 秒」。
+func durationText(sec int64) string {
+	if sec <= 0 {
+		return ""
+	}
+	switch {
+	case sec < 60:
+		return fmt.Sprintf("%d 秒", sec)
+	case sec < 3600:
+		return fmt.Sprintf("%d 分 %d 秒", sec/60, sec%60)
+	default:
+		return fmt.Sprintf("%d 小时 %d 分", sec/3600, (sec%3600)/60)
+	}
+}
+
 // EmitTest 渠道"测试发送"按钮:同步返回投递结果描述。
 // 刻意**不**看 Enabled:禁用渠道的按钮照样能发 —— 想先验通 URL 与模板再启用是常见顺序,
 // 而这是用户亲手点的一次性请求,不是自动告警。
@@ -384,7 +408,10 @@ func channelBody(ch *store.Channel, p Payload) ([]byte, error) {
 		// 载荷里 errorCount 恒为数字(统计失败时是 0),照数字渲染:放在裸值位置
 		// (`{{errorCount}}` 当数字用)也不会像空串那样留下非法 JSON。
 		ErrorCount: strconv.Itoa(p.ErrorCount),
-		Timestamp:  p.Timestamp,
+		// DurationSec 只有恢复事件带值(见 alert.Event.DurationSec),其余事件为 0
+		// ⇒ 渲染成空串,与 EmitMonitorEvent 的口径一致。
+		Duration:  durationText(p.DurationSec),
+		Timestamp: p.Timestamp,
 	}
 	return []byte(notifytmpl.RenderBody(ch.BodyTemplate, v, p.Title, p.Content)), nil
 }

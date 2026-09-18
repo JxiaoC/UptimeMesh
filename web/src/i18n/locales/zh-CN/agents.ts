@@ -108,6 +108,7 @@ export default {
       speed: '触发事件那一轮的平均下载速度(仅下载速度监控;形如 12.34 MB/s)',
       agents: '触发事件那一轮的节点明细(每个节点一行:正常/失败/未回传/离线)',
       errorCount: '此刻仍处于报警状态的监控数(DOWN 事件含本条监控;恢复通知里是恢复后剩下的)',
+      duration: '本次报警的持续时长(仅恢复 UP 事件有值;如「5 分 30 秒」,查不到起点时为空)',
       timestamp: '事件时间(RFC3339)',
     },
     samples: {
@@ -115,6 +116,7 @@ export default {
       content: '监控「官网首页」已触发告警(DOWN)。',
       monitorName: '官网首页',
       agents: '- 华东-1: 失败(状态码 502)\n- 华北-2: 正常(18 ms)',
+      duration: '5 分 30 秒',
     },
     varsNote: '变量值会按 JSON 规则转义,可直接嵌入字符串;放在数值位置(如 {token})也会被转为合法 JSON。请求体渲染后必须是合法 JSON。',
     previewTitle: '渲染预览',

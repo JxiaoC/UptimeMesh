@@ -100,5 +100,6 @@ export default {
   errors: {
     requestFailed: '请求失败',
     network: '网络错误',
+    timeout: '请求超时,请稍后重试',
   },
 }

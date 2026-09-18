@@ -22,13 +22,13 @@ const PushThreshold = 100
 // HTTP 探测参数平铺存储;PING 用 TargetHost;TCP 用 TargetHost + Port;
 // download(下载速度监控)用 URL 等请求侧参数 + Threshold/SpeedUnit。
 type Monitor struct {
-	ID          ID      `json:"id"`
-	Type        string  `json:"type"` // http | ping | tcp | push | download
-	Name        string  `json:"name"`
-	Group       string  `json:"group,omitempty"` // 分组标签,空表示未分组
-	Enabled     bool    `json:"enabled"`
-	Period      int     `json:"period"` // 秒,10~3600
-	Timeout     int     `json:"timeout"` // 探测超时,秒
+	ID      ID     `json:"id"`
+	Type    string `json:"type"` // http | ping | tcp | push | download
+	Name    string `json:"name"`
+	Group   string `json:"group,omitempty"` // 分组标签,空表示未分组
+	Enabled bool   `json:"enabled"`
+	Period  int    `json:"period"`  // 秒,10~3600
+	Timeout int    `json:"timeout"` // 探测超时,秒
 	// Threshold 是告警阈值,解释方式随类型而定:
 	//   http/ping/tcp ⇒ 本次成功率下限(0~100);
 	//   push          ⇒ 恒为 PushThreshold(每轮只有一个样本,填多少都一样);

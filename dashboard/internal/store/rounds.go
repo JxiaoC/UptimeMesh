@@ -105,10 +105,10 @@ const roundCols = `id, monitor_id, assigned_agent_ids, scheduled_at, deadline, c
 
 func scanRound(row interface{ Scan(...any) error }) (*Round, error) {
 	var (
-		r                                    Round
-		assigned, alive, dead, undispatched  sql.NullString
-		scheduled, deadline, closed          int64
-		createdAt                            int64
+		r                                   Round
+		assigned, alive, dead, undispatched sql.NullString
+		scheduled, deadline, closed         int64
+		createdAt                           int64
 	)
 	err := row.Scan(&r.ID, &r.MonitorID, &assigned, &scheduled, &deadline, &closed,
 		&r.State, &r.Success, &r.Valid, &r.TotalAgents, &r.SuccessRate,

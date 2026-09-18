@@ -31,6 +31,10 @@ http.interceptors.response.use(
       localStorage.removeItem(TOKEN_KEY)
       const cur = router.currentRoute.value
       if (cur.name !== 'login') router.push({ name: 'login' })
+    } else if (err.code === 'ECONNABORTED' || err.message === 'canceled') {
+      // axios 超时(ECONNABORTED)与主动中止会走这里:请求根本没拿到响应,
+      // 但不是「网络不通」——多半是后端慢(如 db-stats 赶上写排队),分开提示避免误导。
+      ElMessage.error(tGlobal('errors.timeout'))
     } else {
       ElMessage.error(err.response?.data?.message || tGlobal('errors.network'))
     }

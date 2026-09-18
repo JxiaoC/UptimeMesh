@@ -33,6 +33,7 @@ const vars = computed<VarInfo[]>(() => [
   { name: 'speed', desc: t('channels.vars.speed') },
   { name: 'agents', desc: t('channels.vars.agents') },
   { name: 'errorCount', desc: t('channels.vars.errorCount') },
+  { name: 'duration', desc: t('channels.vars.duration') },
   { name: 'timestamp', desc: t('channels.vars.timestamp') },
 ])
 
@@ -63,6 +64,7 @@ const samples = computed<Record<string, string>>(() => ({
   speed: '12.34 MB/s',
   agents: t('channels.samples.agents'),
   errorCount: '3',
+  duration: t('channels.samples.duration'),
   timestamp: '2026-09-12 10:00:00',
 }))
 

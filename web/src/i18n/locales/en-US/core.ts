@@ -88,6 +88,7 @@ const core: typeof zhCore = {
   errors: {
     requestFailed: 'Request failed',
     network: 'Network error',
+    timeout: 'Request timed out, please try again later',
   },
 }
 

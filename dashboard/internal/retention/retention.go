@@ -1,5 +1,7 @@
 // Package retention 周期删除超保留期的数据。两条策略互相独立:
-//   - 原始检测结果:store.DefaultResultRetentionDays 天,后台可配(1~365);
+//   - 原始检测结果 + 已定稿轮次 + 状态变动记录:store.DefaultResultRetentionDays 天,
+//     后台可配(1~365);三者在同一条保留期下对账(轮次曾设计为永不清理,现纳入,
+//     见 store.PruneOldRounds 的说明;状态变动记录关联轮次取展示明细,跟随清理)。
 //   - 小时级聚合:store.HourlyStatsRetentionDays 天,固定不可配。
 //
 // 启动时立即执行一次,随后每小时对账。
@@ -47,6 +49,8 @@ func (t *Task) RunOnce(ctx context.Context) { t.once(ctx) }
 // 是固定值,不依赖 settings —— 读配置失败(库异常)时不该连带跳过它。
 func (t *Task) once(ctx context.Context) {
 	t.pruneResults(ctx)
+	t.pruneRounds(ctx)
+	t.pruneStateChanges(ctx)
 	t.pruneHourlyStats(ctx)
 }
 
@@ -68,6 +72,50 @@ func (t *Task) pruneResults(ctx context.Context) {
 	}
 	if n > 0 {
 		g.Log().Infof(ctx, "已清理 %d 条超过 %d 天的原始检测结果", n, days)
+	}
+}
+
+// pruneRounds 清理超过保留期的已定稿轮次,与 pruneResults 同一条保留期、同一个截止点。
+// 轮次行数与 results 同量级(每轮一行 vs 每轮每节点一行),是库文件的大头之一。
+func (t *Task) pruneRounds(ctx context.Context) {
+	st, err := t.st.GetSettings(ctx)
+	if err != nil {
+		g.Log().Errorf(ctx, "读取保留期配置失败: %v", err)
+		return
+	}
+	days := st.ResultRetentionDays
+	if days <= 0 {
+		days = store.DefaultResultRetentionDays
+	}
+	n, err := t.st.PruneOldRounds(ctx, time.Now().AddDate(0, 0, -days))
+	if err != nil {
+		g.Log().Errorf(ctx, "清理过期轮次失败: %v", err)
+		return
+	}
+	if n > 0 {
+		g.Log().Infof(ctx, "已清理 %d 个超过 %d 天的已定稿轮次", n, days)
+	}
+}
+
+// pruneStateChanges 清理超过保留期的状态变动记录(与轮次同一条保留期:变动记录按
+// RoundID 关联回轮次取展示明细,轮次被清后它们就是永远渲染不出来的孤儿行)。
+func (t *Task) pruneStateChanges(ctx context.Context) {
+	st, err := t.st.GetSettings(ctx)
+	if err != nil {
+		g.Log().Errorf(ctx, "读取保留期配置失败: %v", err)
+		return
+	}
+	days := st.ResultRetentionDays
+	if days <= 0 {
+		days = store.DefaultResultRetentionDays
+	}
+	n, err := t.st.PruneOldStateChanges(ctx, time.Now().AddDate(0, 0, -days))
+	if err != nil {
+		g.Log().Errorf(ctx, "清理过期状态变动记录失败: %v", err)
+		return
+	}
+	if n > 0 {
+		g.Log().Infof(ctx, "已清理 %d 条超过 %d 天的状态变动记录", n, days)
 	}
 }
 

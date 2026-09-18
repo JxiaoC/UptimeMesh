@@ -109,6 +109,7 @@ const agents: typeof zhAgents = {
       speed: 'Average download speed of the round that triggered the event (download-speed monitors only; e.g. 12.34 MB/s)',
       agents: 'Per-agent detail of the round that triggered the event (one line per agent: OK / failed / no result / offline)',
       errorCount: 'How many monitors are still in the alert state right now (a DOWN event includes this monitor; a recovery notice shows what is left after the recovery)',
+      duration: 'How long this alert lasted (recovery UP events only; e.g. "5 min 30 s", empty when no matching DOWN record is found)',
       timestamp: 'Event time (RFC3339)',
     },
     samples: {
@@ -116,6 +117,7 @@ const agents: typeof zhAgents = {
       content: 'Monitor "Marketing site" fired an alert (DOWN).',
       monitorName: 'Marketing site',
       agents: '- APAC-1: failed (HTTP 502)\n- US-2: OK (18 ms)',
+      duration: '5 min 30 s',
     },
     varsNote: 'Variable values are escaped as JSON, so they can be embedded into strings directly; used in a numeric position (such as {token}) they are still converted to valid JSON. The rendered body must be valid JSON.',
     previewTitle: 'Rendered preview',

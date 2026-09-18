@@ -75,6 +75,8 @@ const settings: typeof zhSettings = {
       samples: {
         monitorName: 'Marketing site',
         agents: '- APAC-1: failed (HTTP 502)\n- US-2: OK (18 ms)',
+        // {{duration}} 的预览示例:仅恢复(UP)事件有值,发送时按实际秒数折算。
+        duration: '5 min 30 s',
       },
     },
     events: {
@@ -83,6 +85,11 @@ const settings: typeof zhSettings = {
       TEST: 'Test message (TEST)',
     },
     db: {
+      // On demand: entering the settings page does not measure automatically (the backend may have to scan the whole file); usage is fetched only when "View usage" is clicked.
+      notLoaded: 'Database usage has not been measured yet. Click "View usage" to start; measuring scans the entire database file and can take tens of seconds when the file is large.',
+      view: 'View usage',
+      // Measuring always runs in the background (also on the first click): the placeholder shows a computing state while polling, without blocking any request.
+      computing: 'Measuring database usage (running in the background)…',
       summary: '{tables} tables and {rows} rows in total; database file {size} (single SQLite file, table usage counted per page).',
       empty: 'No tables yet',
       columnTable: 'Table',
@@ -97,6 +104,7 @@ const settings: typeof zhSettings = {
       compactDone: 'Compaction finished: {before} → {after}, reclaimed {saved}',
       compactIdle: 'Compaction finished: the database is already compact, nothing to reclaim (currently {size})',
       compactDoneTitle: 'Compaction result',
+      dailyGrowth: 'At the current check frequency of {monitors} enabled monitors, about {rounds} rounds and {results} results are added per day (roughly {size}).',
     },
     import: {
       intro: 'Read the monitor list from UptimeKuma and create them as UptimeMesh monitors in bulk. Two ways to read the data:',

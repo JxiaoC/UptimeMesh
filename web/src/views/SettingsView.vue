@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ElMessage } from 'element-plus'
 import { http, TOKEN_KEY } from '../api/http'
@@ -53,6 +53,16 @@ interface DBStats {
   freeSize: number
   freePages: number
   items: TableSize[]
+  // dailyGrowth:按当前启用监控与其检测周期预估的每日增长(后端算,量级参考)。
+  dailyGrowth?: DailyGrowth | null
+}
+
+// 每日增长预估(字段名沿用后端 store.DailyGrowth 的 JSON 契约)。
+interface DailyGrowth {
+  rounds: number
+  results: number
+  bytes: number
+  enabledMonitors: number
 }
 
 // 压缩结果(字段名沿用后端 store.CompactResult 的 JSON 契约)。
@@ -72,6 +82,8 @@ const COMPACT_TIMEOUT_MS = 600000
 const settings = ref<Settings | null>(null)
 const dbStats = ref<DBStats | null>(null)
 const loadingDb = ref(false)
+// 占用统计正在后台重算(刷新按钮按下去之后的轮询态)。
+const computingDb = ref(false)
 const compacting = ref(false)
 const savingDays = ref(false)
 // 最近状态格数单独一个 saving 标记:与保留期各自一键保存,互不阻塞。
@@ -103,6 +115,8 @@ const sampleVars = computed<Record<string, string>>(() => ({
   // 节点明细是多行文本:预览里也要能看出"每个节点一行"的排版效果。
   agents: t('settings.templates.samples.agents'),
   errorCount: '3',
+  // 持续时长只有恢复(UP)事件有值:预览给个示例,让 {{duration}} 的效果看得见。
+  duration: t('settings.templates.samples.duration'),
   timestamp: '2026-09-12 10:00:00',
 }))
 
@@ -135,13 +149,84 @@ async function load() {
   if (!activeEvent.value && events.value.length) activeEvent.value = events.value[0]
 }
 
+// GET /settings/db-stats 的响应:stats 是占用数据,computing 表示后台正在重算
+// (刷新走异步:POST refresh 触发,GET 轮询直到 computing=false)。
+interface DBStatsResponse { stats: DBStats; computing: boolean }
+
+// 轮询间隔与上限:重算通常一两秒内完成(全库 dbstat 扫描),但赶上写排队可能更久;
+// 30 次 ≈ 30 秒仍没算完就停,避免页面被无意义的请求一直打。
+const DBSTATS_POLL_INTERVAL_MS = 1000
+const DBSTATS_POLL_MAX = 30
+
+let dbStatsPollTimer: ReturnType<typeof setTimeout> | null = null
+let dbStatsPollTries = 0
+
+function stopDBStatsPoll() {
+  if (dbStatsPollTimer) {
+    clearTimeout(dbStatsPollTimer)
+    dbStatsPollTimer = null
+  }
+}
+
+/** 拉一次占用快照;返回 computing(后台是否在重算)。首次/失效后 stats 为 null,只更新非空值。 */
+async function fetchDBStatsOnce(): Promise<boolean> {
+  const res = (await http.get('/settings/db-stats')) as unknown as DBStatsResponse
+  if (res.stats) dbStats.value = res.stats
+  return res.computing
+}
+
+// 点「查看占用」或再次点「刷新」:GET 永不阻塞 —— 后端立即返回(可能 stats=null),
+// 重算在后台跑,前端每秒轮询到 computing=false / stats 非空为止。
+// 首次点击也曾在这里同步扫全库,库大或赶上写排队时被前端 15s 超时掐死,
+// 现在统计永远在后台跑,前端 15s 超时/取消的问题从根上消失。
 async function loadDBStats() {
+  stopDBStatsPoll()
   loadingDb.value = true
   try {
-    dbStats.value = (await http.get('/settings/db-stats')) as unknown as DBStats
+    if (await fetchDBStatsOnce()) pollDBStats()
   } catch { /* 拦截器已提示 */ } finally {
     loadingDb.value = false
   }
+}
+
+// 重算期间的轮询:每秒拉一次,computing=false 时把「计算中」按钮态收掉。
+function pollDBStats() {
+  stopDBStatsPoll()
+  dbStatsPollTries = 0
+  computingDb.value = true
+  const tick = async () => {
+    dbStatsPollTries++
+    try {
+      if (!(await fetchDBStatsOnce())) {
+        computingDb.value = false
+        return
+      }
+    } catch {
+      computingDb.value = false
+      return // 拉取失败(拦截器已提示):退出轮询,用户可再点刷新
+    }
+    if (dbStatsPollTries >= DBSTATS_POLL_MAX) {
+      computingDb.value = false
+      return
+    }
+    dbStatsPollTimer = setTimeout(tick, DBSTATS_POLL_INTERVAL_MS)
+  }
+  dbStatsPollTimer = setTimeout(tick, DBSTATS_POLL_INTERVAL_MS)
+}
+
+// 点「查看占用」:首次点击拉一次快照并展示;已有数据后再点等效「刷新」——
+// POST 触发后台重算(立即返回),然后轮询 GET 拿新值。
+// 重算不占用 HTTP 请求,前端 15s 超时/取消的问题从根上消失。
+async function refreshDBStats() {
+  stopDBStatsPoll()
+  if (!dbStats.value) {
+    await loadDBStats()
+    return
+  }
+  try {
+    await http.post('/settings/db-stats/refresh')
+  } catch { /* 拦截器已提示 */ return }
+  pollDBStats()
 }
 
 /** compactDB 压缩数据库(后端 VACUUM):回收空闲页、重建库文件并截断 WAL。 */
@@ -174,7 +259,9 @@ async function compactDB() {
       t('settings.db.compactDoneTitle'),
       { type: res.savedBytes > 0 ? 'success' : 'info' },
     )
-    await loadDBStats() // 表格与汇总句跟着刷新到压缩后的占用
+    // 压缩作废了后端缓存:GET 会同步重算或返回 computing=true,轮询到新值为止,
+    // 表格与汇总句跟着刷新到压缩后的占用。
+    if (await fetchDBStatsOnce()) pollDBStats()
   } catch { /* 拦截器已提示 */ } finally {
     compacting.value = false
   }
@@ -614,10 +701,12 @@ function settingChangeText(change: ConfigSettingChange): string {
 
 onMounted(() => {
   load()
-  loadDBStats()
   loadAgents()
   loadAccount()
 })
+
+// 离开页面时停掉占用轮询,定时器不越过组件生命周期。
+onBeforeUnmount(stopDBStatsPoll)
 
 // ---- 安全:后台登录账号与密码 ----
 // 账号是单管理员(users 表只有一行),所以这里既是"改账号"也是"改密码"。
@@ -913,9 +1002,20 @@ async function resetTemplate() {
       </el-tab-pane>
 
       <el-tab-pane :label="t('settings.tabs.database')" name="database">
+        <!-- 按需加载:进页面不请求,点「查看占用」才拉;未加载前显示引导占位 -->
+        <div v-if="!dbStats" v-loading="loadingDb || computingDb"
+             style="padding:24px 0;color:#909399;font-size:13px;max-width:760px">
+          <p style="margin:0 0 12px">
+            {{ computingDb ? t('settings.db.computing') : t('settings.db.notLoaded') }}
+          </p>
+          <el-button v-if="!computingDb" type="primary" size="small" :loading="loadingDb"
+                     @click="refreshDBStats">
+            {{ t('settings.db.view') }}
+          </el-button>
+        </div>
+        <template v-else>
         <!-- 汇总句里有加粗的库文件大小,故走 i18n-t 的具名插槽 -->
         <i18n-t
-          v-if="dbStats"
           keypath="settings.db.summary"
           tag="p"
           scope="global"
@@ -926,7 +1026,7 @@ async function resetTemplate() {
           <template #size><b>{{ fmtBytes(dbStats.totalSize) }}</b></template>
         </i18n-t>
         <el-table
-          v-if="dbStats" v-loading="loadingDb" :data="dbStats.items"
+          v-loading="loadingDb" :data="dbStats.items"
           size="small" :empty-text="t('settings.db.empty')" style="max-width:760px"
         >
           <el-table-column prop="name" :label="t('settings.db.columnTable')" min-width="140" />
@@ -938,11 +1038,24 @@ async function resetTemplate() {
           </el-table-column>
         </el-table>
         <!-- 灰字提示:沿用本文件其它标签页的行内写法,不依赖样式类 -->
-        <p v-if="dbStats && dbStats.freeSize > 0" style="color:#909399;font-size:12px;margin:6px 0 0;line-height:1.6;max-width:760px">
+        <p v-if="dbStats.freeSize > 0" style="color:#909399;font-size:12px;margin:6px 0 0;line-height:1.6;max-width:760px">
           {{ t('settings.db.freeHint', { size: fmtBytes(dbStats.freeSize) }) }}
         </p>
+        <!-- 每日增长预估:按当前启用监控与检测频率由后端折算,随占用一起刷新 -->
+        <p
+          v-if="dbStats.dailyGrowth && dbStats.dailyGrowth.enabledMonitors > 0"
+          style="color:#909399;font-size:12px;margin:6px 0 0;line-height:1.6;max-width:760px"
+        >
+          <i18n-t keypath="settings.db.dailyGrowth" tag="span" scope="global">
+            <template #monitors>{{ dbStats.dailyGrowth.enabledMonitors }}</template>
+            <template #rounds>{{ dbStats.dailyGrowth.rounds.toLocaleString() }}</template>
+            <template #results>{{ dbStats.dailyGrowth.results.toLocaleString() }}</template>
+            <template #size><b>{{ fmtBytes(dbStats.dailyGrowth.bytes) }}</b></template>
+          </i18n-t>
+        </p>
         <div style="margin-top:10px">
-          <el-button size="small" :loading="loadingDb" @click="loadDBStats">
+          <!-- 首次之后即「刷新」:POST 触发后台重算后轮询,按钮转圈直到 computing=false -->
+          <el-button size="small" :loading="loadingDb || computingDb" @click="refreshDBStats">
             {{ t('settings.db.refresh') }}
           </el-button>
           <el-button type="warning" plain size="small" :loading="compacting" @click="compactDB">
@@ -952,6 +1065,7 @@ async function resetTemplate() {
         <p style="color:#909399;font-size:12px;margin:6px 0 0;line-height:1.6;max-width:760px">
           {{ t('settings.db.compactTip') }}
         </p>
+        </template>
       </el-tab-pane>
 
       <el-tab-pane :label="t('settings.tabs.import')" name="import">

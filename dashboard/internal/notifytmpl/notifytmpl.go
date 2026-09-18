@@ -42,13 +42,17 @@ type Vars struct {
 	// 顺带说清"全局还挂着几个",值班的人不必先打开页面数一遍。取值的口径(只算
 	// 启用中的监控)见 notifier.countDownAlerts;统计失败时为空串。
 	ErrorCount string
-	Timestamp  string
+	// Duration 是本次报警的持续时长(形如 "5 分 30 秒"):只有恢复(UP)事件有值,
+	// 由调度器回查上一条 DOWN 记录算出(见 scheduler.alarmDurationSec)。
+	// DOWN/TEST 事件与查不到起点时为空串 —— 模板里渲染成空,不会残留花括号。
+	Duration string
+	Timestamp string
 }
 
 // Placeholders 支持的占位符名(不含花括号),供文档与前端提示复用。
 var Placeholders = []string{
 	"monitorName", "monitorId", "monitorType", "url", "event", "successRate", "speed",
-	"agents", "errorCount", "timestamp",
+	"agents", "errorCount", "duration", "timestamp",
 }
 
 // BodyPlaceholders 自定义 webhook 请求体模板可用占位符:
@@ -64,7 +68,9 @@ func SampleVars() Vars {
 		Agents: "- 华东-1: 失败(状态码 502)\n- 华北-2: 正常(18.4 ms)",
 		// 报警数取一个"还有几个没恢复"的示例值(默认标题会把它顶在最前面)。
 		ErrorCount: "3",
-		// 时间是示例值,故直接写字面量:样例文案不参与本地化(后端文案恒为中文)。
+		// Duration 是恢复事件才有的变量,示例固定给 DOWN 口径,故留空:
+		// 样例文案不参与本地化(后端文案恒为中文)。
+		// 时间是示例值,故直接写字面量。
 		Timestamp: "2026-09-12 10:00:00",
 	}
 }
@@ -80,6 +86,8 @@ func SampleMessage() (title, content string) {
 // 值班的人第一步要问的正是"哪个节点出了问题"。
 // 标题最前方的 {{errorCount}} 是"此刻还挂着几个报警"(DOWN 含本条,UP 是恢复后剩下的):
 // 面板上同时挂着十几条时,先看这个数就知道是一条新故障还是整片崩了。
+// UP 正文多一行「报警持续时长」({{duration}}):恢复通知最常被追问的就是"挂了多久";
+// 查不到配对的 DOWN 记录时该变量渲染成空(那一行只剩标签,可接受)。
 func Defaults() map[string]Template {
 	return map[string]Template{
 		EventDown: {
@@ -94,6 +102,7 @@ func Defaults() map[string]Template {
 			Content: "监控「{{monitorName}}」已恢复正常(UP)。\n" +
 				"类型:{{monitorType}}\n目标:{{url}}\n" +
 				"本次成功率:{{successRate}}%\n" +
+				"报警持续时长:{{duration}}\n" +
 				"节点状态:\n{{agents}}\n时间:{{timestamp}}",
 		},
 		EventTest: {
@@ -128,6 +137,7 @@ func DefaultsFor(monitorType string) map[string]Template {
 		Content: "监控「{{monitorName}}」已恢复正常(UP)。\n" +
 			"类型:{{monitorType}}\n目标:{{url}}\n" +
 			"平均下载速度:{{speed}}\n" +
+			"报警持续时长:{{duration}}\n" +
 			"节点状态:\n{{agents}}\n时间:{{timestamp}}",
 	}
 	return out
@@ -181,6 +191,7 @@ func Render(t Template, v Vars) Template {
 		"{{speed}}", v.Speed,
 		"{{agents}}", v.Agents,
 		"{{errorCount}}", v.ErrorCount,
+		"{{duration}}", v.Duration,
 		"{{timestamp}}", v.Timestamp,
 	)
 	return Template{Title: r.Replace(t.Title), Content: r.Replace(t.Content)}
@@ -201,6 +212,7 @@ func RenderBody(body string, v Vars, title, content string) string {
 		"{{speed}}", jsonEscape(v.Speed),
 		"{{agents}}", jsonEscape(v.Agents),
 		"{{errorCount}}", jsonEscape(v.ErrorCount),
+		"{{duration}}", jsonEscape(v.Duration),
 		"{{timestamp}}", jsonEscape(v.Timestamp),
 		"{{title}}", jsonEscape(title),
 		"{{content}}", jsonEscape(content),

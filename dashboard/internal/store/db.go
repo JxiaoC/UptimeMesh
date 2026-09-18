@@ -48,6 +48,16 @@ type Store struct {
 	// compactMu 串行化数据库压缩(VACUUM 会长时间独占唯一写连接,不允许排队两个)。
 	// 与 mu(关闭保护)分开,避免压缩期间阻塞 Close 之外的路径。见 compact.go。
 	compactMu sync.Mutex
+
+	// statsMu/statsCache 数据库占用统计(DBStats)的短缓存:读它要全库扫描 dbstat
+	// 并逐表 COUNT(*),与写路径共用唯一连接时还会排队,没必要每次点刷新都重算。
+	// 见 stats.go 的说明;压缩结束由 invalidateDBStats 主动失效。
+	// statsRefreshing 标记已有一个后台重算在跑(单飞行,防 goroutine 堆积)。
+	// statsEpoch 在缓存作废时 +1:让压缩前开跑的后台重算写回时自我丢弃。
+	statsMu         sync.Mutex
+	statsCache      *dbStatsCache
+	statsRefreshing bool
+	statsEpoch      uint64
 }
 
 // New 打开(必要时创建)path 处的 SQLite 库并应用 schema。

@@ -72,6 +72,9 @@ func (s *Store) Compact(ctx context.Context) (*CompactResult, error) {
 	if err != nil {
 		return nil, err
 	}
+	// 占用口径已被 VACUUM 改变:立刻作废缓存,保证设置页「压缩后刷新」读到的是
+	// 压缩后的真实占用,而不是缓存里的压缩前数字。
+	s.invalidateDBStats()
 	out := &CompactResult{
 		BeforeBytes: before,
 		AfterBytes:  after,

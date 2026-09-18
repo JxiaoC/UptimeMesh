@@ -79,6 +79,8 @@ export default {
         monitorName: '官网首页',
         // 节点明细是多行文本:预览里要能看出"每个节点一行"的排版。
         agents: '- 华东-1: 失败(状态码 502)\n- 华北-2: 正常(18 ms)',
+        // {{duration}} 的预览示例:仅恢复(UP)事件有值,发送时按实际秒数折算。
+        duration: '5 分 30 秒',
       },
     },
     events: {
@@ -87,6 +89,11 @@ export default {
       TEST: '测试消息(TEST)',
     },
     db: {
+      // 按需加载:进入设置页不自动统计(后端可能要全库扫描),点「查看占用」才请求。
+      notLoaded: '尚未统计数据库占用。点「查看占用」开始统计;统计要扫描整个库文件,库大时可能需要数十秒。',
+      view: '查看占用',
+      // 统计在后台跑(首次点击也是):轮询期间占位区显示计算中,不阻塞任何请求。
+      computing: '正在统计数据库占用(后台计算中),完成后自动展示…',
       summary: '共 {tables} 张表、{rows} 行数据;库文件 {size}(SQLite 单文件存储,表占用按页统计)。',
       empty: '暂无数据表',
       columnTable: '表',
@@ -102,6 +109,8 @@ export default {
       compactDone: '压缩完成:{before} → {after},释放 {saved}',
       compactIdle: '压缩完成:数据库已是紧凑状态,没有可回收的空间(当前 {size})',
       compactDoneTitle: '压缩结果',
+      // 每日增长预估:后端按启用监控的检测周期与注册节点数折算(字节系数取实测摊销值)。
+      dailyGrowth: '按当前 {monitors} 个启用监控的检测频率,预计每天新增约 {rounds} 个轮次、{results} 条检测结果(约 {size})。',
     },
     import: {
       intro: '从 UptimeKuma 读取监控清单并批量建为 UptimeMesh 监控,支持两种取数方式:',

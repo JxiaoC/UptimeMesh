@@ -75,7 +75,7 @@ func roundView(rd *store.Round, results []*store.CheckResult) g.Map {
 		// 任务没交到节点手上的那些(与离线同"不计分母",但成因在派发侧):
 		// 详情页据此显示「未派发任务」而不是「离线缺样」。
 		"missingUndispatched": rd.MissingUndispatched,
-		"results": resultViews(results),
+		"results":             resultViews(results),
 	}
 }
 

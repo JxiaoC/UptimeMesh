@@ -16,11 +16,11 @@ const (
 // LastRoundState 记录最近定稿轮次状态(CLOSED|UNKNOWN),供 UI 派生展示:
 // 暂停→灰、最近轮 UNKNOWN→UNKNOWN、否则 UP/DOWN。
 type MonitorState struct {
-	ID              string    `json:"id"` // monitorID hex
-	AlertState      string    `json:"alertState"`
-	Consecutive     int       `json:"consecutive"` // 连续破线轮计数
-	LastRoundState  string    `json:"lastRoundState"`
-	LastSuccessRate float64   `json:"lastSuccessRate"`
+	ID              string  `json:"id"` // monitorID hex
+	AlertState      string  `json:"alertState"`
+	Consecutive     int     `json:"consecutive"` // 连续破线轮计数
+	LastRoundState  string  `json:"lastRoundState"`
+	LastSuccessRate float64 `json:"lastSuccessRate"`
 	// LastSpeedKbps 是最近一轮的平均下载速度(KB/s,仅下载速度监控;其余类型为 0)。
 	LastSpeedKbps float64   `json:"lastSpeedKbps"`
 	UpdatedAt     time.Time `json:"updatedAt"`

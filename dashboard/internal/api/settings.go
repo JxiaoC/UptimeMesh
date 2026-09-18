@@ -17,6 +17,8 @@ import (
 func (a *API) registerSettingsRoutes(group *ghttp.RouterGroup) {
 	group.GET("/settings", a.getSettings)
 	group.GET("/settings/db-stats", a.getDBStats)
+	// 刷新占用是异步的:POST 触发后台重算立即返回,前端轮询 GET 直到 computing=false。
+	group.POST("/settings/db-stats/refresh", a.refreshDBStats)
 	group.POST("/settings/db-compact", a.compactDB)
 	group.POST("/settings/rotate-key", a.rotateEnrollmentKey)
 	group.PUT("/settings/retention", a.setRetention)
@@ -176,14 +178,26 @@ func validateAdminPassword(pw string) string {
 
 // ---- 安全:后台登录账号与密码(完) ----
 
-// getDBStats 数据库占用大小(诊断展示),含各集合明细。
+// getDBStats 数据库占用大小(诊断展示),含各表集合明细。
+//
+// 异步语义:统计要全库扫描 dbstat + 逐表 COUNT(*),与写路径共用唯一 SQLite 连接
+// (ADR-0005)时可能耗时远超前端超时,故 GET 永不阻塞在慢查询上 —— 命中缓存直接返回;
+// 缓存过期且有旧值时立即返回旧值并触发后台重算(computing=true);无任何缓存
+// (首次访问/压缩后)返回 stats=null + computing=true。前端轮询本接口直到
+// computing=false 且 stats 非 null,再展示。
 func (a *API) getDBStats(r *ghttp.Request) {
-	st, err := a.Store.DBStats(r.Context())
-	if err != nil {
-		r.Response.WriteJsonExit(g.Map{"code": 500, "message": "读取数据库占用失败"})
-		return
-	}
-	r.Response.WriteJsonExit(g.Map{"code": 0, "data": st})
+	st := a.Store.DBStats()
+	r.Response.WriteJsonExit(g.Map{"code": 0, "data": g.Map{
+		"stats":     st,
+		"computing": st == nil || a.Store.DBStatsComputing(),
+	}})
+}
+
+// refreshDBStats 触发后台重算数据库占用(POST /settings/db-stats/refresh)。
+// 立即返回:重算在后台 goroutine 里跑,前端随后轮询 GET /settings/db-stats。
+func (a *API) refreshDBStats(r *ghttp.Request) {
+	a.Store.RefreshDBStats()
+	r.Response.WriteJsonExit(g.Map{"code": 0})
 }
 
 // compactDB 压缩数据库(POST /settings/db-compact)。
