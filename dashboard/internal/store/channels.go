@@ -56,7 +56,7 @@ func (s *Store) ListChannels(ctx context.Context) ([]*Channel, error) {
 
 // FindChannelByID 按主键取渠道;不存在返回 ErrNotFound。
 func (s *Store) FindChannelByID(ctx context.Context, id ID) (*Channel, error) {
-	row := s.db.QueryRowContext(ctx, `SELECT `+channelCols+` FROM channels WHERE id=?`, id)
+	row := s.dbRead.QueryRowContext(ctx, `SELECT `+channelCols+` FROM channels WHERE id=?`, id)
 	return scanChannel(row)
 }
 
@@ -80,7 +80,7 @@ func (s *Store) FindChannelsByIDs(ctx context.Context, hexIDs []string) []*Chann
 }
 
 func (s *Store) queryChannels(ctx context.Context, query string, args ...any) ([]*Channel, error) {
-	rows, err := s.db.QueryContext(ctx, query, args...)
+	rows, err := s.dbRead.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, normalizeErr(err)
 	}

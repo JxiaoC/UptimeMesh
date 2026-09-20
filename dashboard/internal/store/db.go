@@ -35,12 +35,18 @@ var ErrClosed = errors.New("存储已关闭")
 // Store 是进程内唯一的数据访问入口。
 //
 // 并发模型(ADR-0005):Dashboard 是唯一写者,SQLite 同时只允许一个写事务,
-// 故连接池固定为 1 条连接 —— 写全串行,彻底避免 SQLITE_BUSY;读取共用该连接,
-// 在本项目的量级下(单实例、日增约数十万行)延迟可忽略。将来读放大时再拆
-// 「单写连接 + 多读连接池」。
+// 故写连接池固定为 1 条连接 —— 写全串行,彻底避免 SQLITE_BUSY。
+// 读走独立的连接池(dbRead):WAL 模式下读写不互斥,慢读(如占用统计的
+// 逐表 COUNT(*),赶上写排队时耗时明显)不再把 HTTP 接口的读请求堵在唯一连接上
+// —— 线上踩过:占用重算期间 GET /settings 反复挂起 20s+,反代 10s 掐成 502。
+// 写连接仍保持 1 条,是 ADR-0005 的硬约定,不要动。
 type Store struct {
-	db   *sql.DB
+	db   *sql.DB // 写连接池:固定 1 条连接,所有写语句与事务走这里
 	path string
+
+	// dbRead 读连接池:只跑 SELECT(PRAGMA 只读项也算读)。WAL 下读不阻塞写、
+	// 写不阻塞读,但同一时刻库文件仍只有一个版本,读池连接看到的是已提交快照。
+	dbRead *sql.DB
 
 	mu     sync.Mutex
 	closed bool
@@ -49,15 +55,22 @@ type Store struct {
 	// 与 mu(关闭保护)分开,避免压缩期间阻塞 Close 之外的路径。见 compact.go。
 	compactMu sync.Mutex
 
-	// statsMu/statsCache 数据库占用统计(DBStats)的短缓存:读它要全库扫描 dbstat
-	// 并逐表 COUNT(*),与写路径共用唯一连接时还会排队,没必要每次点刷新都重算。
+	// compactStatusMu/compactStatus 异步压缩的状态快照(见 compact.go):POST 只触发,
+	// 执行在后台 goroutine,前端轮询状态接口拿阶段、估算进度与结果。
+	compactStatusMu sync.Mutex
+	compactStatus   CompactStatus
+
+	// statsMu/statsCache 数据库占用统计(DBStats)的短缓存:读它要逐表 COUNT(*),
+	// 与写路径共用唯一连接时还会排队,没必要每次点刷新都重算。
 	// 见 stats.go 的说明;压缩结束由 invalidateDBStats 主动失效。
 	// statsRefreshing 标记已有一个后台重算在跑(单飞行,防 goroutine 堆积)。
 	// statsEpoch 在缓存作废时 +1:让压缩前开跑的后台重算写回时自我丢弃。
+	// statsCancel 是在跑重算的取消函数(压缩前停掉它,避免 VACUUM 撞读锁)。
 	statsMu         sync.Mutex
 	statsCache      *dbStatsCache
 	statsRefreshing bool
 	statsEpoch      uint64
+	statsCancel     context.CancelFunc
 }
 
 // New 打开(必要时创建)path 处的 SQLite 库并应用 schema。
@@ -76,17 +89,31 @@ func New(ctx context.Context, path string) (*Store, error) {
 	db.SetMaxIdleConns(1)
 	db.SetConnMaxLifetime(0)
 
+	// 读连接池:几条连接足够(本项目读并发本就不高),给 4 条让慢读(占用统计)
+	// 排队时不至于堵死其他读请求。同样挂 busy_timeout 等连接级 PRAGMA。
+	dbRead, err := sql.Open("sqlite", dsn)
+	if err != nil {
+		_ = db.Close()
+		return nil, fmt.Errorf("打开 SQLite 读连接失败: %w", err)
+	}
+	dbRead.SetMaxOpenConns(4)
+	dbRead.SetMaxIdleConns(4)
+	dbRead.SetConnMaxLifetime(0)
+
 	if err = db.PingContext(ctx); err != nil {
 		_ = db.Close()
+		_ = dbRead.Close()
 		return nil, fmt.Errorf("连接 SQLite 失败(%s): %w", path, err)
 	}
-	s := &Store{db: db, path: path}
+	s := &Store{db: db, dbRead: dbRead, path: path}
 	if err = s.applySchema(ctx); err != nil {
 		_ = db.Close()
+		_ = dbRead.Close()
 		return nil, fmt.Errorf("初始化表结构失败: %w", err)
 	}
 	if err = s.applyColumnMigrations(ctx); err != nil {
 		_ = db.Close()
+		_ = dbRead.Close()
 		return nil, fmt.Errorf("补列失败: %w", err)
 	}
 	return s, nil
@@ -312,6 +339,7 @@ func (s *Store) Close() error {
 		return nil
 	}
 	s.closed = true
+	_ = s.dbRead.Close()
 	return s.db.Close()
 }
 
@@ -320,9 +348,9 @@ func (s *Store) Exec(ctx context.Context, query string, args ...any) (sql.Result
 	return s.db.ExecContext(ctx, query, args...)
 }
 
-// QueryRow 查询单行(供包内与测试使用)。
+// QueryRow 查询单行(供包内与测试使用);读走读连接池。
 func (s *Store) QueryRow(ctx context.Context, query string, args ...any) *sql.Row {
-	return s.db.QueryRowContext(ctx, query, args...)
+	return s.dbRead.QueryRowContext(ctx, query, args...)
 }
 
 // ---- ID ----

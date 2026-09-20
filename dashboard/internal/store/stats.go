@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"time"
+
+	"github.com/gogf/gf/v2/frame/g"
 )
 
 // HourlyStat 小时级预聚合(票 09):总览卡片 24h/7d/30d 可用率的数据源。
@@ -56,7 +58,7 @@ func (s *Store) AddHourlyStat(ctx context.Context, monitorID ID, hour time.Time,
 
 // GetHourlyStatsSince 某监控 since 之后的小时桶,按桶升序。
 func (s *Store) GetHourlyStatsSince(ctx context.Context, monitorID ID, since time.Time) ([]*HourlyStat, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT id, monitor_id, hour, rounds, valid,
+	rows, err := s.dbRead.QueryContext(ctx, `SELECT id, monitor_id, hour, rounds, valid,
 		success, latency_sum_ms, latency_count, updated_at FROM hourly_stats
 		WHERE monitor_id=? AND hour>=? ORDER BY hour ASC`,
 		monitorID.Hex(), HourBucket(since))
@@ -122,7 +124,7 @@ func (s *Store) GetStatsBuckets(ctx context.Context, monitorID ID,
 	if err != nil {
 		return nil, err
 	}
-	rows, err := s.db.QueryContext(ctx, `SELECT (scheduled_at / ?) * ? AS bucket_at,
+	rows, err := s.dbRead.QueryContext(ctx, `SELECT (scheduled_at / ?) * ? AS bucket_at,
 			COUNT(*), COALESCE(SUM(valid),0), COALESCE(SUM(success),0),
 			COALESCE(SUM(latency_sum_ms),0), COALESCE(SUM(latency_count),0),
 			COALESCE(SUM(speed_sum_kbps),0), COALESCE(SUM(speed_count),0)
@@ -169,7 +171,7 @@ func (s *Store) GetAgentLatencyBuckets(ctx context.Context, monitorID ID,
 	if err != nil {
 		return nil, err
 	}
-	rows, err := s.db.QueryContext(ctx, `SELECT agent_id,
+	rows, err := s.dbRead.QueryContext(ctx, `SELECT agent_id,
 			(scheduled_at / ?) * ? AS bucket_at, AVG(latency_ms), COUNT(*)
 		FROM results
 		WHERE monitor_id=? AND late=0 AND scheduled_at>=? AND scheduled_at<=?
@@ -251,17 +253,7 @@ func (s *Store) Availabilities(ctx context.Context, monitorID ID,
 	return out, nil
 }
 
-// TableSize 单张表的占用明细(字节)。
-type TableSize struct {
-	Name        string `json:"name"`
-	Count       int64  `json:"count"`
-	DataSize    int64  `json:"dataSize"`
-	StorageSize int64  `json:"storageSize"`
-	IndexSize   int64  `json:"indexSize"`
-	TotalSize   int64  `json:"totalSize"`
-}
-
-// DBStats 数据库整体占用:页数与页大小换算 + 各表行数/占用(按合计降序)。
+// DBStats 数据库整体占用:页数与页大小换算 + 全库行数(按合计降序)。
 type DBStats struct {
 	Name        string `json:"name"`
 	Collections int    `json:"collections"`
@@ -274,7 +266,6 @@ type DBStats struct {
 	// 清理留下的空洞。它是「压缩数据库」能回收的上限,0 表示库文件已是紧凑状态。
 	FreePages int64       `json:"freePages"`
 	FreeSize  int64       `json:"freeSize"`
-	Items     []TableSize `json:"items"`
 	// DailyGrowth:按当前启用的监控与其检测周期,预估每天新增的行数与字节量。
 	// 字节系数来自本库的实测摊销(数据行 + 索引摊到每行),只做量级参考,
 	// 不是精确值 —— 随着监控增删/调速会自动跟上,读的是当下的配置。
@@ -308,12 +299,12 @@ func (s *Store) EstimateDailyGrowth(ctx context.Context) (*DailyGrowth, error) {
 		periodSum int64
 		agents    int64
 	)
-	if err := s.db.QueryRowContext(ctx,
+	if err := s.dbRead.QueryRowContext(ctx,
 		`SELECT COUNT(*), COALESCE(SUM(period),0) FROM monitors WHERE enabled=1`,
 	).Scan(&enabled, &periodSum); err != nil {
 		return nil, normalizeErr(err)
 	}
-	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM agents`).Scan(&agents); err != nil {
+	if err := s.dbRead.QueryRowContext(ctx, `SELECT COUNT(*) FROM agents`).Scan(&agents); err != nil {
 		return nil, normalizeErr(err)
 	}
 	if enabled == 0 {
@@ -337,7 +328,7 @@ var statTables = []string{
 }
 
 // dbStatsCacheTTL 占用统计的缓存时长。够短:后台重算完成后最多 5 秒即读到新值
-// (且刷新会主动失效);够长:轮询期间不重复全库扫描。
+// (且刷新会主动失效);够长:轮询期间不重复逐表 COUNT(*)。
 const dbStatsCacheTTL = 5 * time.Second
 
 // dbStatsCache DBStats 的缓存值(带时间戳)。
@@ -346,9 +337,8 @@ type dbStatsCache struct {
 	stats *DBStats
 }
 
-// DBStats 读取数据库占用(只读缓存):总占用走 page_count*page_size,逐表行数走
-// COUNT(*),逐表字节数走 dbstat 虚表(dbstat 不可用时字节列回落 0,不影响接口可用)。
-// 只读诊断用途,供设置页展示。
+// DBStats 读取数据库占用(只读缓存):总占用走 page_count*page_size,全库行数走
+// 逐表 COUNT(*) 累加。只读诊断用途,供设置页展示。
 //
 // 缓存语义(供 API 层的「异步刷新 + 前端轮询」使用),任何路径都不阻塞在慢查询上:
 //   - 缓存未过期:立即返回缓存值。
@@ -371,7 +361,7 @@ func (s *Store) DBStats() *DBStats {
 	s.statsMu.Unlock()
 
 	if haveStale {
-		// 返回旧值顶住页面,重算交给后台:dbstat 全库扫描赶上写排队可能很久,
+		// 返回旧值顶住页面,重算交给后台:赶上写排队时逐表 COUNT(*) 也可能变慢,
 		// 不能让 GET 请求一直挂着(15s 级别的前端超时会把它掐死)。
 		s.RefreshDBStats()
 		s.statsMu.Lock()
@@ -394,11 +384,16 @@ func (s *Store) RefreshDBStats() {
 	}
 	s.statsRefreshing = true
 	epoch := s.statsEpoch
+	// 可取消的上下文:压缩(VACUUM)前要停掉在跑的重算 —— 占用统计的慢查询
+	// 在读池上握着读锁,WAL 下 VACUUM 需要独占,不取消的话压缩会撞锁失败。
+	ctx, cancel := context.WithCancel(context.Background())
+	s.statsCancel = cancel
 	s.statsMu.Unlock()
 
 	go func() {
-		// 后台重算用独立的超时上下文,与触发它的请求生命周期解耦。
-		ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+		started := time.Now()
+		// 后台重算与触发它的请求生命周期解耦;超时兜底防扫描异常时 goroutine 常驻。
+		ctx, cancel := context.WithTimeout(ctx, time.Minute)
 		defer cancel()
 		out, err := s.readDBStats(ctx)
 		s.statsMu.Lock()
@@ -407,10 +402,33 @@ func (s *Store) RefreshDBStats() {
 			s.statsCache = &dbStatsCache{at: time.Now(), stats: out}
 		}
 		s.statsRefreshing = false
+		s.statsCancel = nil
 		s.statsMu.Unlock()
-		// 失败不重试也不上报:下次 TTL 过期/手动刷新自然重来,缓存里还有旧值可读。
-		_ = err
+		// 失败不重试:下次 TTL 过期/手动刷新自然重来,缓存里还有旧值可读;
+		// 但不能无声吞掉 —— 前端只会看到"一直计算中",没有日志就无从排查。
+		// 被压缩取消(context.Canceled)是预期路径,降为 Debug 不告警。
+		if err != nil {
+			if ctx.Err() == context.Canceled {
+				g.Log().Debugf(ctx, "数据库占用统计被取消(压缩前让路,耗时 %v)", time.Since(started))
+				return
+			}
+			g.Log().Warningf(ctx, "数据库占用统计失败(耗时 %v):%v", time.Since(started), err)
+			return
+		}
+		// 耗时留痕:逐表 COUNT(*) 在库大或赶上写排队时可能明显变慢,
+		// 排查"查看占用迟迟不出结果"时靠这条对时间线。
+		g.Log().Debugf(ctx, "数据库占用统计完成:耗时 %v", time.Since(started))
 	}()
+}
+
+// cancelDBStatsRefresh 取消正在跑的占用统计重算(压缩前调用);没有在跑就无事发生。
+// 取消后 statsRefreshing 要等 goroutine 收尾才复位,调用方若需要等它退出可轮询 DBStatsComputing。
+func (s *Store) cancelDBStatsRefresh() {
+	s.statsMu.Lock()
+	defer s.statsMu.Unlock()
+	if s.statsCancel != nil {
+		s.statsCancel()
+	}
 }
 
 // DBStatsComputing 是否正有占用统计在计算(后台重算在跑,或还没有任何缓存值)。
@@ -433,11 +451,11 @@ func (s *Store) invalidateDBStats() {
 // readDBStats 实际执行占用统计(不写缓存;写回由调用方决定,后台路径要过 epoch 检查)。
 func (s *Store) readDBStats(ctx context.Context) (*DBStats, error) {
 	out := &DBStats{Name: s.path}
-	if err := s.db.QueryRowContext(ctx, `PRAGMA page_count`).Scan(&out.TotalSize); err != nil {
+	if err := s.dbRead.QueryRowContext(ctx, `PRAGMA page_count`).Scan(&out.TotalSize); err != nil {
 		return nil, normalizeErr(err)
 	}
 	var pageSize int64
-	if err := s.db.QueryRowContext(ctx, `PRAGMA page_size`).Scan(&pageSize); err != nil {
+	if err := s.dbRead.QueryRowContext(ctx, `PRAGMA page_size`).Scan(&pageSize); err != nil {
 		return nil, normalizeErr(err)
 	}
 	out.TotalSize *= pageSize
@@ -445,53 +463,21 @@ func (s *Store) readDBStats(ctx context.Context) (*DBStats, error) {
 	out.DataSize = out.TotalSize
 	out.Collections = len(statTables)
 	// 空闲页(可回收空间):读不到不影响其余统计。
-	_ = s.db.QueryRowContext(ctx, `PRAGMA freelist_count`).Scan(&out.FreePages)
+	_ = s.dbRead.QueryRowContext(ctx, `PRAGMA freelist_count`).Scan(&out.FreePages)
 	out.FreeSize = out.FreePages * pageSize
 
-	sizes, dbstatOK := s.tableBytes(ctx)
-
-	out.Items = make([]TableSize, 0, len(statTables))
 	for _, name := range statTables {
-		item := TableSize{Name: name}
-		if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM `+name).Scan(&item.Count); err != nil {
+		var count int64
+		if err := s.dbRead.QueryRowContext(ctx, `SELECT COUNT(*) FROM `+name).Scan(&count); err != nil {
 			return nil, normalizeErr(err)
 		}
-		if dbstatOK {
-			item.DataSize = sizes[name]
-			// dbstat 的 pgsize 已含该表的索引页,索引项独立统计需额外拆解,
-			// 这里按「可见占用 = 表页」呈现,索引列保持 0。
-			item.TotalSize = item.DataSize
-		}
-		item.StorageSize = item.DataSize
-		out.Objects += item.Count
-		out.Items = append(out.Items, item)
+		out.Objects += count
 	}
 	// 每日增长预估失败不影响占用明细本身(诊断信息,能出多少出多少)。
 	if g, err := s.EstimateDailyGrowth(ctx); err == nil {
 		out.DailyGrowth = g
 	}
 	return out, nil
-}
-
-// tableBytes 读取各表占用字节(dbstat 是 SQLite 内置虚表);不可用时返回 ok=false。
-func (s *Store) tableBytes(ctx context.Context) (map[string]int64, bool) {
-	out := map[string]int64{}
-	rows, err := s.db.QueryContext(ctx,
-		`SELECT name, SUM(pgsize) FROM dbstat GROUP BY name`)
-	if err != nil {
-		return out, false
-	}
-	defer rows.Close()
-	for rows.Next() {
-		var (
-			name string
-			size int64
-		)
-		if err = rows.Scan(&name, &size); err == nil {
-			out[name] = size
-		}
-	}
-	return out, true
 }
 
 // pruneBatchSize 保留期清理的单批删除行数。
@@ -601,9 +587,9 @@ func (s *Store) CountResults(ctx context.Context, cutoff time.Time) (int64, erro
 		err error
 	)
 	if cutoff.IsZero() {
-		err = s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM results`).Scan(&n)
+		err = s.dbRead.QueryRowContext(ctx, `SELECT COUNT(*) FROM results`).Scan(&n)
 	} else {
-		err = s.db.QueryRowContext(ctx,
+		err = s.dbRead.QueryRowContext(ctx,
 			`SELECT COUNT(*) FROM results WHERE created_at < ?`, unixSec(cutoff)).Scan(&n)
 	}
 	return n, normalizeErr(err)

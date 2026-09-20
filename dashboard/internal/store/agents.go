@@ -233,7 +233,7 @@ func applyAgentRefresh(existing, incoming *Agent, nowUnix int64) {
 // name 是后台可改的展示名,拿它当身份键会让改过名的节点在下次带接入密钥连进来时
 // 认不出自己(见 .scratch/agent-rename/spec.md)。
 func (s *Store) findAgentByIdentity(ctx context.Context, enrollName, sourceIP string) (*Agent, error) {
-	row := s.db.QueryRowContext(ctx,
+	row := s.dbRead.QueryRowContext(ctx,
 		`SELECT `+agentCols+` FROM agents WHERE enroll_name=? AND source_ip=?`, enrollName, sourceIP)
 	return scanAgent(row)
 }
@@ -243,7 +243,7 @@ func (s *Store) FindAgentByCredentialHash(ctx context.Context, hash string) (*Ag
 	if hash == "" {
 		return nil, ErrNotFound
 	}
-	row := s.db.QueryRowContext(ctx,
+	row := s.dbRead.QueryRowContext(ctx,
 		`SELECT `+agentCols+` FROM agents WHERE credential_hash=? AND status=?`,
 		hash, AgentApproved)
 	return scanAgent(row)
@@ -295,7 +295,7 @@ func (s *Store) FindAllAgentsIncludingDeleted(ctx context.Context) ([]*Agent, er
 }
 
 func (s *Store) findAgents(ctx context.Context, where string, args ...any) ([]*Agent, error) {
-	rows, err := s.db.QueryContext(ctx,
+	rows, err := s.dbRead.QueryContext(ctx,
 		`SELECT `+agentCols+` FROM agents WHERE `+where+` ORDER BY created_at DESC`, args...)
 	if err != nil {
 		return nil, normalizeErr(err)
@@ -314,7 +314,7 @@ func (s *Store) findAgents(ctx context.Context, where string, args ...any) ([]*A
 
 // FindAgentByID 按主键取节点;不存在返回 ErrNotFound。
 func (s *Store) FindAgentByID(ctx context.Context, id ID) (*Agent, error) {
-	row := s.db.QueryRowContext(ctx, `SELECT `+agentCols+` FROM agents WHERE id=?`, id)
+	row := s.dbRead.QueryRowContext(ctx, `SELECT `+agentCols+` FROM agents WHERE id=?`, id)
 	return scanAgent(row)
 }
 

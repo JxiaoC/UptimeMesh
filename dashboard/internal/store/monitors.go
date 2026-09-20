@@ -188,7 +188,7 @@ func (s *Store) InsertMonitor(ctx context.Context, m *Monitor) error {
 
 // FindMonitorByID 按主键取监控;不存在返回 ErrNotFound。
 func (s *Store) FindMonitorByID(ctx context.Context, id ID) (*Monitor, error) {
-	row := s.db.QueryRowContext(ctx, `SELECT `+monitorCols+` FROM monitors WHERE id=?`, id)
+	row := s.dbRead.QueryRowContext(ctx, `SELECT `+monitorCols+` FROM monitors WHERE id=?`, id)
 	return scanMonitor(row)
 }
 
@@ -214,7 +214,7 @@ func (s *Store) FindMonitorsByIDs(ctx context.Context, ids []ID) ([]*Monitor, er
 }
 
 func (s *Store) queryMonitors(ctx context.Context, query string, args ...any) ([]*Monitor, error) {
-	rows, err := s.db.QueryContext(ctx, query, args...)
+	rows, err := s.dbRead.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, normalizeErr(err)
 	}
@@ -253,7 +253,7 @@ func (s *Store) UpdateMonitor(ctx context.Context, m *Monitor) error {
 
 // FindMonitorByPushToken 按上报令牌取 push 监控;未找到返回 ErrNotFound。
 func (s *Store) FindMonitorByPushToken(ctx context.Context, token string) (*Monitor, error) {
-	row := s.db.QueryRowContext(ctx,
+	row := s.dbRead.QueryRowContext(ctx,
 		`SELECT `+monitorCols+` FROM monitors WHERE push_token=? AND push_token<>''`, token)
 	return scanMonitor(row)
 }
@@ -407,7 +407,7 @@ func (s *Store) DeleteMonitorsCascade(ctx context.Context, ids []ID) (int64, err
 // 暂停的监控同样算"所有监控"(它们恢复后照样要告警),不额外过滤。
 func (s *Store) AttachChannelToMonitors(ctx context.Context, channelID ID) (
 	changed []*Monitor, total int, err error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT id, channel_ids FROM monitors`)
+	rows, err := s.dbRead.QueryContext(ctx, `SELECT id, channel_ids FROM monitors`)
 	if err != nil {
 		return nil, 0, normalizeErr(err)
 	}
@@ -484,7 +484,7 @@ func hasString(list []string, want string) bool {
 
 // DetachChannelFromMonitors 从所有监控的勾选里摘除某渠道,避免悬空引用。
 func (s *Store) DetachChannelFromMonitors(ctx context.Context, channelID ID) error {
-	rows, err := s.db.QueryContext(ctx, `SELECT id, channel_ids FROM monitors`)
+	rows, err := s.dbRead.QueryContext(ctx, `SELECT id, channel_ids FROM monitors`)
 	if err != nil {
 		return normalizeErr(err)
 	}

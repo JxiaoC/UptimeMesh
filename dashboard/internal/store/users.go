@@ -57,7 +57,7 @@ func (s *Store) GetAdmin(ctx context.Context) (*User, error) {
 		u       User
 		created int64
 	)
-	err := s.db.QueryRowContext(ctx,
+	err := s.dbRead.QueryRowContext(ctx,
 		`SELECT id, username, pass_hash, created_at FROM users WHERE id=?`, adminRowID).
 		Scan(&u.ID, &u.Username, &u.PassHash, &created)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -119,7 +119,7 @@ func (s *Store) VerifyAdmin(ctx context.Context, username, password string) erro
 		u       User
 		created int64
 	)
-	err := s.db.QueryRowContext(ctx,
+	err := s.dbRead.QueryRowContext(ctx,
 		`SELECT id, username, pass_hash, created_at FROM users WHERE id=?`, "admin").
 		Scan(&u.ID, &u.Username, &u.PassHash, &created)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -138,7 +138,7 @@ func (s *Store) VerifyAdmin(ctx context.Context, username, password string) erro
 // countRows 统计某表行数(表名来自内部常量,不接受外部输入)。
 func (s *Store) countRows(ctx context.Context, table string) (int64, error) {
 	var n int64
-	err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM `+table).Scan(&n)
+	err := s.dbRead.QueryRowContext(ctx, `SELECT COUNT(*) FROM `+table).Scan(&n)
 	return n, normalizeErr(err)
 }
 
@@ -148,7 +148,7 @@ func (s *Store) CountAgents(ctx context.Context, name string) (int64, error) {
 		return s.countRows(ctx, TableAgents)
 	}
 	var n int64
-	err := s.db.QueryRowContext(ctx,
+	err := s.dbRead.QueryRowContext(ctx,
 		`SELECT COUNT(*) FROM agents WHERE name=?`, name).Scan(&n)
 	return n, normalizeErr(err)
 }

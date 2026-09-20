@@ -237,7 +237,7 @@ func (s *Store) CloseOrphanOpenRounds(ctx context.Context) (int64, error) {
 
 // listOrphanOpenRounds 读出全部残留 OPEN 轮次及其复算所需信息。
 func (s *Store) listOrphanOpenRounds(ctx context.Context) ([]orphanRound, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT r.id, r.monitor_id, r.assigned_agent_ids,
+	rows, err := s.dbRead.QueryContext(ctx, `SELECT r.id, r.monitor_id, r.assigned_agent_ids,
 			r.scheduled_at, COALESCE(m.type, '')
 		FROM rounds r LEFT JOIN monitors m ON m.id = r.monitor_id
 		WHERE r.state=? ORDER BY r.scheduled_at ASC`, RoundStateOpen)
@@ -279,7 +279,7 @@ func (s *Store) recoverOrphanRound(ctx context.Context, rd orphanRound) (bool, e
 	for _, id := range rd.Assigned {
 		assigned[id] = true
 	}
-	rows, err := s.db.QueryContext(ctx, `SELECT agent_id, ok, latency_ms, speed_kbps
+	rows, err := s.dbRead.QueryContext(ctx, `SELECT agent_id, ok, latency_ms, speed_kbps
 		FROM results WHERE round_id=? AND late=0`, rd.ID)
 	if err != nil {
 		return false, normalizeErr(err)
@@ -362,7 +362,7 @@ func (s *Store) forceCloseOpenRounds(ctx context.Context) (int64, error) {
 
 // FindRoundByID 按主键取轮次;不存在返回 ErrNotFound。
 func (s *Store) FindRoundByID(ctx context.Context, id ID) (*Round, error) {
-	row := s.db.QueryRowContext(ctx, `SELECT `+roundCols+` FROM rounds WHERE id=?`, id)
+	row := s.dbRead.QueryRowContext(ctx, `SELECT `+roundCols+` FROM rounds WHERE id=?`, id)
 	return scanRound(row)
 }
 
@@ -372,7 +372,7 @@ func (s *Store) ListRoundsByMonitor(ctx context.Context, monitorID ID, limit int
 	if limit <= 0 || limit > 500 {
 		limit = 100
 	}
-	rows, err := s.db.QueryContext(ctx, `SELECT `+roundCols+` FROM rounds
+	rows, err := s.dbRead.QueryContext(ctx, `SELECT `+roundCols+` FROM rounds
 		WHERE monitor_id=? ORDER BY scheduled_at DESC, rowid DESC LIMIT ?`, monitorID, limit)
 	if err != nil {
 		return nil, normalizeErr(err)
@@ -391,7 +391,7 @@ func (s *Store) ListRoundsByMonitor(ctx context.Context, monitorID ID, limit int
 
 // FindLatestClosed 最近一个定稿轮次(含 UNKNOWN;总览卡片"最近轮"用)。
 func (s *Store) FindLatestClosed(ctx context.Context, monitorID ID) (*Round, bool, error) {
-	row := s.db.QueryRowContext(ctx, `SELECT `+roundCols+` FROM rounds
+	row := s.dbRead.QueryRowContext(ctx, `SELECT `+roundCols+` FROM rounds
 		WHERE monitor_id=? AND state<>? ORDER BY scheduled_at DESC LIMIT 1`,
 		monitorID, RoundStateOpen)
 	r, err := scanRound(row)
@@ -458,7 +458,7 @@ func (s *Store) ListRecentRoundsByMonitors(ctx context.Context, monitorIDs []ID,
 		args = append(args, id.Hex())
 	}
 	args = append(args, limit)
-	rows, err := s.db.QueryContext(ctx, `SELECT monitor_id, state, success_rate, scheduled_at,
+	rows, err := s.dbRead.QueryContext(ctx, `SELECT monitor_id, state, success_rate, scheduled_at,
 			speed_sum_kbps, speed_count FROM (
 			SELECT monitor_id, state, success_rate, scheduled_at, speed_sum_kbps, speed_count,
 				ROW_NUMBER() OVER (PARTITION BY monitor_id ORDER BY scheduled_at DESC) AS rn
@@ -488,7 +488,7 @@ func (s *Store) ListRecentRoundsByMonitors(ctx context.Context, monitorIDs []ID,
 
 // FindResultsByRound 一轮内各节点的回传结果。
 func (s *Store) FindResultsByRound(ctx context.Context, roundID ID) ([]*CheckResult, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT id, round_id, monitor_id, agent_id, ok,
+	rows, err := s.dbRead.QueryContext(ctx, `SELECT id, round_id, monitor_id, agent_id, ok,
 		latency_ms, http_status, error, speed_kbps, late, scheduled_at, created_at
 		FROM results WHERE round_id=? ORDER BY agent_id`, roundID)
 	if err != nil {
@@ -518,7 +518,7 @@ func (s *Store) FindResultsByRound(ctx context.Context, roundID ID) ([]*CheckRes
 
 // CountRoundsWithState 某监控各定稿状态轮次数(总览/详情用)。
 func (s *Store) CountRoundsWithState(ctx context.Context, monitorID ID) (map[string]int, error) {
-	rows, err := s.db.QueryContext(ctx,
+	rows, err := s.dbRead.QueryContext(ctx,
 		`SELECT state, COUNT(*) FROM rounds WHERE monitor_id=? GROUP BY state`, monitorID)
 	if err != nil {
 		return nil, normalizeErr(err)

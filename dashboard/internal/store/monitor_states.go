@@ -45,7 +45,7 @@ func scanMonitorState(row interface{ Scan(...any) error }) (*MonitorState, error
 
 // GetMonitorState 不存在时返回初始态(UP/0)且 found=false。
 func (s *Store) GetMonitorState(ctx context.Context, monitorID ID) (*MonitorState, bool, error) {
-	row := s.db.QueryRowContext(ctx,
+	row := s.dbRead.QueryRowContext(ctx,
 		`SELECT `+monitorStateCols+` FROM monitor_states WHERE id=?`, monitorID.Hex())
 	st, err := scanMonitorState(row)
 	if errors.Is(err, ErrNotFound) {
@@ -104,7 +104,7 @@ func (s *Store) GetMonitorStatesByIDs(ctx context.Context, ids []string) map[str
 	for _, id := range ids {
 		args = append(args, id)
 	}
-	rows, err := s.db.QueryContext(ctx,
+	rows, err := s.dbRead.QueryContext(ctx,
 		`SELECT `+monitorStateCols+` FROM monitor_states WHERE id IN (`+inPlaceholders(len(args))+`)`,
 		args...)
 	if err != nil {
@@ -131,7 +131,7 @@ func (s *Store) GetMonitorStatesByIDs(ctx context.Context, ids []string) map[str
 // 没有状态行的监控(从未定稿过)自然不在结果里。
 func (s *Store) CountDownMonitors(ctx context.Context) (int, error) {
 	var n int
-	err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM monitor_states st
+	err := s.dbRead.QueryRowContext(ctx, `SELECT COUNT(*) FROM monitor_states st
 		JOIN monitors m ON m.id = st.id WHERE st.alert_state=? AND m.enabled=1`,
 		MonitorDOWN).Scan(&n)
 	return n, normalizeErr(err)

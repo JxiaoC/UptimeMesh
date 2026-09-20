@@ -31,16 +31,6 @@ const eventLabels = computed<Record<string, string>>(() => ({
   TEST: t('settings.events.TEST'),
 }))
 
-// SQLite 表占用明细(字段名沿用后端 DBStats/TableSize 的 JSON 契约)。
-interface TableSize {
-  name: string
-  count: number
-  dataSize: number
-  storageSize: number
-  indexSize: number
-  totalSize: number
-}
-
 interface DBStats {
   name: string
   collections: number
@@ -52,7 +42,6 @@ interface DBStats {
   // freeSize/freePages:库文件里的空闲页(已删除数据留下的空洞)= 压缩能回收的上限。
   freeSize: number
   freePages: number
-  items: TableSize[]
   // dailyGrowth:按当前启用监控与其检测周期预估的每日增长(后端算,量级参考)。
   dailyGrowth?: DailyGrowth | null
 }
@@ -153,10 +142,10 @@ async function load() {
 // (刷新走异步:POST refresh 触发,GET 轮询直到 computing=false)。
 interface DBStatsResponse { stats: DBStats; computing: boolean }
 
-// 轮询间隔与上限:重算通常一两秒内完成(全库 dbstat 扫描),但赶上写排队可能更久;
-// 30 次 ≈ 30 秒仍没算完就停,避免页面被无意义的请求一直打。
-const DBSTATS_POLL_INTERVAL_MS = 1000
-const DBSTATS_POLL_MAX = 30
+// 轮询间隔与上限:重算要走逐表 COUNT(*),赶上写排队时可能明显变慢,
+// 上限放宽到 120 次 × 2s ≈ 4 分钟,超限给明确提示而不是无声放弃。
+const DBSTATS_POLL_INTERVAL_MS = 2000
+const DBSTATS_POLL_MAX = 120
 
 let dbStatsPollTimer: ReturnType<typeof setTimeout> | null = null
 let dbStatsPollTries = 0
@@ -206,6 +195,9 @@ function pollDBStats() {
       return // 拉取失败(拦截器已提示):退出轮询,用户可再点刷新
     }
     if (dbStatsPollTries >= DBSTATS_POLL_MAX) {
+      // 超限不再静默:库特别大时重算可能超过上限,告诉用户可以稍后再点刷新,
+      // 否则页面会退回占位区而用户以为功能坏了(线上 1.7GB 库重算约 40s 曾踩中)。
+      ElMessage.info(t('settings.db.computingSlow'))
       computingDb.value = false
       return
     }
@@ -1025,19 +1017,6 @@ async function resetTemplate() {
           <template #rows>{{ dbStats.objects.toLocaleString() }}</template>
           <template #size><b>{{ fmtBytes(dbStats.totalSize) }}</b></template>
         </i18n-t>
-        <el-table
-          v-loading="loadingDb" :data="dbStats.items"
-          size="small" :empty-text="t('settings.db.empty')" style="max-width:760px"
-        >
-          <el-table-column prop="name" :label="t('settings.db.columnTable')" min-width="140" />
-          <el-table-column :label="t('settings.db.columnRows')" width="110" align="right">
-            <template #default="{ row }">{{ row.count.toLocaleString() }}</template>
-          </el-table-column>
-          <el-table-column :label="t('settings.db.columnSize')" width="120" align="right">
-            <template #default="{ row }">{{ fmtBytes(row.dataSize) }}</template>
-          </el-table-column>
-        </el-table>
-        <!-- 灰字提示:沿用本文件其它标签页的行内写法,不依赖样式类 -->
         <p v-if="dbStats.freeSize > 0" style="color:#909399;font-size:12px;margin:6px 0 0;line-height:1.6;max-width:760px">
           {{ t('settings.db.freeHint', { size: fmtBytes(dbStats.freeSize) }) }}
         </p>

@@ -85,16 +85,14 @@ const settings: typeof zhSettings = {
       TEST: 'Test message (TEST)',
     },
     db: {
-      // On demand: entering the settings page does not measure automatically (the backend may have to scan the whole file); usage is fetched only when "View usage" is clicked.
-      notLoaded: 'Database usage has not been measured yet. Click "View usage" to start; measuring scans the entire database file and can take tens of seconds when the file is large.',
+      // On demand: entering the settings page does not measure automatically (the backend has to COUNT(*) every table); usage is fetched only when "View usage" is clicked.
+      notLoaded: 'Database usage has not been measured yet. Click "View usage" to start.',
       view: 'View usage',
       // Measuring always runs in the background (also on the first click): the placeholder shows a computing state while polling, without blocking any request.
       computing: 'Measuring database usage (running in the background)…',
-      summary: '{tables} tables and {rows} rows in total; database file {size} (single SQLite file, table usage counted per page).',
-      empty: 'No tables yet',
-      columnTable: 'Table',
-      columnRows: 'Rows',
-      columnSize: 'Table pages',
+      // Poll limit (about 4 minutes) exceeded without a result: fallback hint for very large or slow disks, instead of silently returning to the placeholder.
+      computingSlow: 'Measuring is taking a long time. Try "Refresh usage" again later.',
+      summary: '{tables} tables and {rows} rows in total; database file {size} (single SQLite file, usage counted per page).',
       refresh: 'Refresh usage',
       compact: 'Compact database',
       compactTip: 'Compacting rewrites the database file from the current data: it reclaims the free pages left by deleted rows and truncates the WAL, deleting no data and changing neither table structures nor query results. While it runs, the database takes exclusive write access, so result and round writes queue up — the larger the file, the longer it takes.',

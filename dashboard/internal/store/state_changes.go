@@ -68,7 +68,7 @@ func (s *Store) InsertStateChange(ctx context.Context, sc *MonitorStateChange) e
 // 报警的持续时长(见 Scheduler.applyAlert)。按 changed_at DESC, rowid DESC 与列表
 // 查询同序,保证"读到的就是页面上那条报错记录"。
 func (s *Store) FindLastStateChangeByToState(ctx context.Context, monitorID ID, toState string) (*MonitorStateChange, error) {
-	row := s.db.QueryRowContext(ctx, `SELECT `+stateChangeCols+` FROM monitor_state_changes
+	row := s.dbRead.QueryRowContext(ctx, `SELECT `+stateChangeCols+` FROM monitor_state_changes
 		WHERE monitor_id=? AND to_state=? ORDER BY changed_at DESC, rowid DESC LIMIT 1`,
 		monitorID, toState)
 	return scanStateChange(row)
@@ -80,7 +80,7 @@ func (s *Store) ListStateChangesByMonitor(ctx context.Context, monitorID ID, lim
 	if limit <= 0 || limit > 200 {
 		limit = 20
 	}
-	rows, err := s.db.QueryContext(ctx, `SELECT `+stateChangeCols+` FROM monitor_state_changes
+	rows, err := s.dbRead.QueryContext(ctx, `SELECT `+stateChangeCols+` FROM monitor_state_changes
 		WHERE monitor_id=? ORDER BY changed_at DESC, rowid DESC LIMIT ?`, monitorID, limit)
 	if err != nil {
 		return nil, normalizeErr(err)
@@ -104,7 +104,7 @@ func (s *Store) ListStateChanges(ctx context.Context, limit int) ([]*MonitorStat
 	if limit <= 0 || limit > 200 {
 		limit = 20
 	}
-	rows, err := s.db.QueryContext(ctx, `SELECT `+stateChangeCols+` FROM monitor_state_changes
+	rows, err := s.dbRead.QueryContext(ctx, `SELECT `+stateChangeCols+` FROM monitor_state_changes
 		ORDER BY changed_at DESC, rowid DESC LIMIT ?`, limit)
 	if err != nil {
 		return nil, normalizeErr(err)
@@ -124,7 +124,7 @@ func (s *Store) ListStateChanges(ctx context.Context, limit int) ([]*MonitorStat
 // CountStateChanges 某监控的变动记录条数(测试与诊断用)。
 func (s *Store) CountStateChanges(ctx context.Context, monitorID ID) (int64, error) {
 	var n int64
-	err := s.db.QueryRowContext(ctx,
+	err := s.dbRead.QueryRowContext(ctx,
 		`SELECT COUNT(*) FROM monitor_state_changes WHERE monitor_id=?`, monitorID).Scan(&n)
 	return n, normalizeErr(err)
 }

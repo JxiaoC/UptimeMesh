@@ -153,7 +153,7 @@ func (s *Store) EnsureSettings(ctx context.Context) (createdKey string, err erro
 
 // GetSettings 读取全局配置;不存在返回 ErrNotFound。
 func (s *Store) GetSettings(ctx context.Context) (*Settings, error) {
-	row := s.db.QueryRowContext(ctx,
+	row := s.dbRead.QueryRowContext(ctx,
 		`SELECT `+settingsCols+` FROM settings WHERE id=?`, settingsID)
 	return scanSettings(row)
 }

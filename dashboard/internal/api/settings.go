@@ -19,7 +19,10 @@ func (a *API) registerSettingsRoutes(group *ghttp.RouterGroup) {
 	group.GET("/settings/db-stats", a.getDBStats)
 	// 刷新占用是异步的:POST 触发后台重算立即返回,前端轮询 GET 直到 computing=false。
 	group.POST("/settings/db-stats/refresh", a.refreshDBStats)
+	// 压缩同样是异步的:POST 触发后台 VACUUM 立即返回,前端轮询下面的状态接口
+	// 直到 running=false,再读结果(阶段与估算进度一并给出)。
 	group.POST("/settings/db-compact", a.compactDB)
+	group.GET("/settings/db-compact/status", a.getCompactStatus)
 	group.POST("/settings/rotate-key", a.rotateEnrollmentKey)
 	group.PUT("/settings/retention", a.setRetention)
 	// 监控列表页「最近状态」一列的格数(后台可配,默认 50)。
@@ -178,9 +181,9 @@ func validateAdminPassword(pw string) string {
 
 // ---- 安全:后台登录账号与密码(完) ----
 
-// getDBStats 数据库占用大小(诊断展示),含各表集合明细。
+// getDBStats 数据库占用大小(诊断展示):总占用 + 全库行数 + 空闲页 + 每日增长预估。
 //
-// 异步语义:统计要全库扫描 dbstat + 逐表 COUNT(*),与写路径共用唯一 SQLite 连接
+// 异步语义:统计要逐表 COUNT(*),与写路径共用唯一 SQLite 连接
 // (ADR-0005)时可能耗时远超前端超时,故 GET 永不阻塞在慢查询上 —— 命中缓存直接返回;
 // 缓存过期且有旧值时立即返回旧值并触发后台重算(computing=true);无任何缓存
 // (首次访问/压缩后)返回 stats=null + computing=true。前端轮询本接口直到
@@ -200,28 +203,32 @@ func (a *API) refreshDBStats(r *ghttp.Request) {
 	r.Response.WriteJsonExit(g.Map{"code": 0})
 }
 
-// compactDB 压缩数据库(POST /settings/db-compact)。
+// compactDB 触发数据库压缩(POST /settings/db-compact)。
 //
-// 同步执行、不等后台:压缩是管理员主动发起的一次性维护,请求期间界面按钮处于
-// loading,结束后立即拿到「压缩前/后」的大小;代价是响应可能耗时数十秒(前端为此
-// 单独放宽了超时),期间所有写入排队(见 store.Compact 的说明)。
+// 异步语义(与 db-stats 一致):同步等待 VACUUM 曾把请求拖过反代/前端超时 —— 504 之后
+// 服务端其实还在压缩,管理员却只看到失败,还会忍不住再点一次。现在 POST 只负责触发,
+// 立即返回;执行在后台 goroutine,前端轮询 GET /settings/db-compact/status 直到
+// running=false,阶段与估算进度随状态一并返回。
 //
 // 只允许一个管理员触发一次:并发请求直接以 409 拒绝,不让第二个请求白白排队。
 func (a *API) compactDB(r *ghttp.Request) {
-	res, err := a.Store.Compact(r.Context())
-	if errors.Is(err, store.ErrCompactBusy) {
-		r.Response.WriteJsonExit(g.Map{"code": 409, "message": "数据库压缩正在进行中,请稍候再试"})
-		return
-	}
-	if err != nil {
-		g.Log().Errorf(r.Context(), "数据库压缩失败: %v", err)
+	if err := a.Store.StartCompact(); err != nil {
+		if errors.Is(err, store.ErrCompactBusy) {
+			r.Response.WriteJsonExit(g.Map{"code": 409, "message": "数据库压缩正在进行中,请稍候再试"})
+			return
+		}
+		g.Log().Errorf(r.Context(), "触发数据库压缩失败: %v", err)
 		r.Response.WriteJsonExit(g.Map{"code": 500, "message": "数据库压缩失败"})
 		return
 	}
-	g.Log().Infof(r.Context(), "管理员 %s 压缩数据库:%d → %d 字节(释放 %d,空闲页 %d,WAL 截断 %d,用时 %dms)",
-		r.GetCtxVar(ctxUserKey).String(), res.BeforeBytes, res.AfterBytes, res.SavedBytes,
-		res.FreePages, res.WalBytes, res.DurationMs)
-	r.Response.WriteJsonExit(g.Map{"code": 0, "message": "已压缩", "data": res})
+	g.Log().Infof(r.Context(), "管理员 %s 触发数据库压缩(后台执行)", r.GetCtxVar(ctxUserKey).String())
+	r.Response.WriteJsonExit(g.Map{"code": 0, "message": "已开始压缩"})
+}
+
+// getCompactStatus 查询压缩状态(GET /settings/db-compact/status):前端轮询本接口,
+// running=false 时读 result(成功)或 error(失败)。
+func (a *API) getCompactStatus(r *ghttp.Request) {
+	r.Response.WriteJsonExit(g.Map{"code": 0, "data": a.Store.CompactStatus()})
 }
 
 // rotateEnrollmentKey 轮换全局接入密钥;明文仅此响应返回。
