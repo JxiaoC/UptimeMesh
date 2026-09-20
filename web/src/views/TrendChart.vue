@@ -16,17 +16,24 @@ interface Bucket {
   success: number
   rounds: number
 }
-// AgentSeries 单个节点的延时序列(按 bucketAt 对齐到主桶轴)。
+// AgentSeries 单个节点的序列(按 bucketAt 对齐到主桶轴)。
+// 画延时还是速度由 metric 决定:下载速度监控传各节点的 KB/s,其余传各节点的延时(ms);
+// 换算到展示单位(速度随 speedUnit)由本组件负责 —— 它才知道当前口径与单位。
 interface AgentSeries {
   name: string
   region?: string
   data: (number | null)[]
 }
-// withDefaults:metric 决定第一条曲线的口径 ——
-//   rate :可用率(0~100,左轴)
-//   speed:下载速度(左轴,单位随监控配置)
+// withDefaults:metric 决定整张图的口径 ——
+//   rate :可用率(0~100,左轴)+ 平均延迟与各节点延迟(ms,右轴)
+//   speed:平均下载速度(左轴)+ 各节点下载速度(左轴),单位随监控配置
+//
+// 两种口径的**曲线条数与纵轴数都不同**:速度口径没有延时曲线,右轴也随之隐藏
+// (见 render 里的 secondSeries 与 yAxis 说明)。所以这里不写"第二条曲线永远是延迟",
+// 而是按 metric 分派 —— 一个下载速度监控的图上不该出现 ms 刻度。
 const props = withDefaults(defineProps<{
   data: Bucket[]
+  /** 各节点序列:速度口径给 KB/s,可用率口径给 ms(见 AgentSeries)。 */
   agents?: AgentSeries[]
   metric?: 'rate' | 'speed'
   speedUnit?: string
@@ -66,8 +73,8 @@ const agentOf = (name: string) => props.agents.find((a) => a.name === name)
 
 // valueUnits 按系列下标给出悬浮提示里的数值单位(render 每次重建)。
 // 提示里的节点名只有节点名本身、不带任何单位,裸数字(1218.19)看不出是毫秒还是别的口径,
-// 所以值后面统一补单位:0 号主曲线是可用率(%)或速度(监控配置的单位),
-// 其余全是延迟(平均延迟 + 各节点延迟),一律 ms。
+// 所以值后面统一补单位。两种口径各自内部同单位:可用率监控是 %(主曲线)+ ms(平均延迟
+// 与各节点延迟),下载速度监控**全是速度**(平均速度与各节点速度),单位即监控配置的单位。
 let valueUnits: string[] = []
 
 /** 悬浮提示走 HTML,可以直接用 flag-icons 的 CSS 类画旗。 */
@@ -143,6 +150,9 @@ function render() {
   if (!chart) return
   const isSpeed = props.metric === 'speed'
   // 第一条曲线的名字与口径随监控类型而变:成功率监控画可用率,下载速度监控画速度。
+  // 速度口径下主曲线是**各节点样本的加权平均**(后端 speed_sum/speed_count),
+  // 所以名字写全「平均下载速度」—— 它与下面各节点自己的速度是同一个量纲,
+  // 写「下载速度」会让人以为它属于某个节点。
   const PRIMARY_NAME = isSpeed ? t('chart.speed') : t('chart.availability')
   const LATENCY_NAME = t('chart.avgLatency')
   const data = props.data
@@ -153,14 +163,21 @@ function render() {
       ? (d.avgSpeedKbps == null ? null : d.avgSpeedKbps / speedDivisor.value)
       : d.availability,
   )
-  const lat = data.map((d) => d.avgLatencyMs)
   // 点太稀时折线无长度可画(单点甚至完全空白),退化为显示数据点符号
   const showSymbol = data.length < 8
   // 阈值:null 表示不画(见 props.threshold 的说明)。
   const th = thresholdValue()
   const markLine = th == null ? null : thresholdMarkLine(th)
 
-  const names = [PRIMARY_NAME, LATENCY_NAME, ...props.agents.map((a) => a.name)]
+  // 速度口径下没有第二条主曲线:延时对"这个文件下得快不快"没有解释力,而
+  // 「平均速度」这件事已经由主曲线承担(它就是全体样本的平均),再画一条同数据的线
+  // 只会完全重合。可用率口径保留延时曲线 —— 它在那边是独立的右轴口径。
+  const secondSeries: echarts.SeriesOption[] = isSpeed ? [] : [{
+    name: LATENCY_NAME, type: 'line', yAxisIndex: 1, smooth: true, showSymbol,
+    data: data.map((d) => d.avgLatencyMs), itemStyle: { color: '#409eff' }, lineStyle: { width: 2 },
+  }]
+
+  const names = [PRIMARY_NAME, ...secondSeries.map((s) => s.name as string), ...props.agents.map((a) => a.name)]
   // 图例在 canvas 上绘制,国旗只能用富文本背景图(rich.backgroundColor.image)。
   const rich: Record<string, unknown> = {}
   const richKey = new Map<string, string>()
@@ -172,6 +189,12 @@ function render() {
     richKey.set(a.name, key)
   })
 
+  // 各节点曲线与第二条主曲线同口径同轴:速度口径画各节点自己的速度(共用速度轴),
+  // 其余画各节点延时(共用延迟轴),便于横向比较。
+  // agents 的数据由调用方按当前 metric 给对应口径:速度监控给 KB/s,其余给 ms
+  // (见 props.agents 的说明)。速度的展示单位换算在这里做,只有组件知道 speedUnit。
+  const agentYAxis = isSpeed ? 0 : 1
+
   const series: echarts.SeriesOption[] = [
     {
       name: PRIMARY_NAME, type: 'line', yAxisIndex: 0, smooth: true, showSymbol,
@@ -180,21 +203,23 @@ function render() {
       // 阈值虚线挂在主曲线上:它与主曲线共用左轴,标记才能落在正确的数值高度。
       ...(markLine ? { markLine } : {}),
     },
-    {
-      name: LATENCY_NAME, type: 'line', yAxisIndex: 1, smooth: true, showSymbol,
-      data: lat, itemStyle: { color: '#409eff' }, lineStyle: { width: 2 },
-    },
-    // 各节点延时:共用延迟轴,便于横向比较
+    ...secondSeries,
     ...props.agents.map((a, i) => ({
-      name: a.name, type: 'line' as const, yAxisIndex: 1, smooth: true, showSymbol,
-      data: a.data, itemStyle: { color: AGENT_COLORS[i % AGENT_COLORS.length] },
+      name: a.name, type: 'line' as const, yAxisIndex: agentYAxis, smooth: true, showSymbol,
+      data: isSpeed ? a.data.map((v) => (v == null ? null : v / speedDivisor.value)) : a.data,
+      itemStyle: { color: AGENT_COLORS[i % AGENT_COLORS.length] },
       lineStyle: { width: 1, type: 'dashed' as const },
       connectNulls: false,
     })),
   ]
 
-  // 悬浮提示的数值单位(与上面 series 的下标一一对应,见 valueUnits 的说明)。
-  valueUnits = series.map((_, i) => (i === 0 ? (isSpeed ? (props.speedUnit || 'KB/s') : '%') : 'ms'))
+  // 悬浮提示的数值单位(与上面 series 的下标一一对应,见 valueUnits 的说明):
+  // 可用率口径是 %(主曲线)+ ms(延时曲线与各节点);速度口径全是速度,同一个单位。
+  const speedUnitText = props.speedUnit || 'KB/s'
+  valueUnits = series.map((_, i) => {
+    if (isSpeed) return speedUnitText
+    return i === 0 ? '%' : 'ms'
+  })
 
   chart.setOption({
     tooltip: { trigger: 'axis', formatter: tooltipFormatter },
@@ -208,7 +233,11 @@ function render() {
       },
       textStyle: { rich },
     },
-    grid: { left: 48, right: 48, top: 70, bottom: 30 },
+    // 右轴(延时)只给可用率口径用:速度口径下没有一条曲线挂在它上面,画出来就是
+    // 一条光秃秃的「延迟(ms)」刻度,读者还得先确认"这条轴是空的"。轴数组长度保持
+    // 两个不动,只把 show 关掉 —— series 的 yAxisIndex 语义(0=速度/可用率,1=延时)
+    // 因此恒定,不必随口径改下标。
+    grid: { left: 48, right: isSpeed ? 24 : 48, top: 70, bottom: 30 },
     xAxis: { type: 'category', data: buckets, boundaryGap: data.length < 2 },
     yAxis: [
       // 可用率固定 0~100;速度没有上限(按数据自适应),轴名带监控配置的单位。
@@ -226,7 +255,7 @@ function render() {
           max: th == null ? undefined : ({ max }: { max: number }) => Math.max(max, th),
         }
         : { type: 'value', name: t('chart.axisAvailability'), min: 0, max: 100, axisLabel: { formatter: '{value}%' } },
-      { type: 'value', name: t('chart.axisLatency'), splitLine: { show: false } },
+      { type: 'value', name: t('chart.axisLatency'), splitLine: { show: false }, show: !isSpeed },
     ],
     series,
     // yAxis 用 replaceMerge 整体替换而不是合并。

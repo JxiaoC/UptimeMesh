@@ -226,13 +226,20 @@ async function copyPushUrl() {
   }
 }
 
-// agentSeries 把分节点延时对齐到主桶轴(按桶起点匹配,缺失桶留 null 断线)。
+// agentSeries 把分节点曲线对齐到主桶轴(按桶起点匹配,缺失桶留 null 断线)。
+// 口径随监控类型:下载速度监控取各节点速度(KB/s),其余取各节点延时(ms)——
+// 与趋势图主曲线的口径一致(见 TrendChart 的 metric)。速度的展示单位换算在
+// TrendChart 里做(只有它知道 speedUnit),这里一律给接口原样的 KB/s。
 const agentSeries = computed(() => {
   if (!agentLatency.value.length) return []
+  const isSpeed = isDownload.value
   const byAgent = new Map<string, Map<number, number>>()
   for (const p of agentLatency.value) {
+    // 速度口径下 0 是真实观测(这个桶里这个节点一个字节都没下下来),不是缺值:
+    // 与延时口径的"没有样本"(null)区分开 —— 后者断线,前者画在 0 上。
+    const v = isSpeed ? p.avgSpeedKbps : p.avgLatencyMs
     const m = byAgent.get(p.agentId) ?? new Map<number, number>()
-    m.set(p.bucketAt, p.avgLatencyMs)
+    m.set(p.bucketAt, v)
     byAgent.set(p.agentId, m)
   }
   const axis = stats.value.map((s) => s.bucketAt)

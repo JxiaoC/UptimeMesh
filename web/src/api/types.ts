@@ -75,10 +75,16 @@ export interface StatsBucket {
   rounds: number
 }
 
-/** 分节点延时点:与 StatsBucket 同颗粒度、同桶边界。 */
+/**
+ * 分节点趋势点:与 StatsBucket 同颗粒度、同桶边界。
+ * 延时与速度出自同一次聚合(同一条结果的两个侧面),调用方按监控类型取用:
+ * 下载速度监控的节点曲线画 avgSpeedKbps,其余画 avgLatencyMs。
+ */
 export interface AgentLatencyPoint {
   agentId: string
   bucketAt: number
   avgLatencyMs: number
+  /** 桶内平均下载速度(KB/s);下载失败的样本速度为 0 但照样计数。 */
+  avgSpeedKbps: number
   count: number
 }

@@ -65,7 +65,7 @@ const detail: typeof zhDetail = {
     avgLatency: 'Average latency (ms)',
     axisAvailability: 'Availability',
     axisLatency: 'Latency (ms)',
-    speed: 'Download speed',
+    speed: 'Average download speed',
     axisSpeed: 'Speed',
     threshold: 'Threshold',
   },

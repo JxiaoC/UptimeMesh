@@ -152,19 +152,27 @@ func (s *Store) GetStatsBuckets(ctx context.Context, monitorID ID,
 	return out, normalizeErr(rows.Err())
 }
 
-// AgentLatencyPoint 某节点在某个粒度桶内的平均延时(详情页分节点曲线用)。
+// AgentLatencyPoint 某节点在某个粒度桶内的平均延时与平均下载速度(详情页分节点曲线用)。
 type AgentLatencyPoint struct {
 	AgentID      ID        `json:"agentId"`
 	BucketAt     time.Time `json:"bucketAt"`
 	AvgLatencyMs float64   `json:"avgLatencyMs"`
-	Count        int       `json:"count"`
+	// AvgSpeedKbps 是桶内平均下载速度(KB/s)。与延时同一行结果、同一次聚合:
+	// 下载速度监控的节点曲线画它,其余监控画延时,调用方按监控类型二选一。
+	// 口径与轮次聚合一致 —— 下载失败的样本速度为 0 但照样进分母(见
+	// scheduler.aggregate),所以"这个节点这个桶内完全下不动"会得到 0 而不是缺值。
+	AvgSpeedKbps float64 `json:"avgSpeedKbps"`
+	Count        int     `json:"count"`
 }
 
-// GetAgentLatencyBuckets 按「节点 + 任意粒度桶」聚合原始结果的延时均值。
+// GetAgentLatencyBuckets 按「节点 + 任意粒度桶」聚合原始结果的延时均值与速度均值。
 // 分桶与过滤统一以 results.scheduled_at(所属轮次计划时间)为准,与主趋势同口径、
 // 同桶边界,前端可按桶起点对齐到同一横轴。
 // 只统计非晚到样本(与轮次聚合一致);原始结果受保留期约束,超出保留期的窗口
 // 没有节点曲线(主趋势走 rounds,不受影响),按实际有样本的桶返回。
+//
+// 两种口径出自同一条聚合:详情页的节点曲线随监控类型而变(下载速度监控画速度、
+// 其余画延时),分两次查询会让两条曲线各有一套桶边界,反而不如一次带出。
 func (s *Store) GetAgentLatencyBuckets(ctx context.Context, monitorID ID,
 	from, to time.Time, bucket time.Duration) ([]*AgentLatencyPoint, error) {
 	sec, err := bucketSeconds(bucket)
@@ -172,7 +180,7 @@ func (s *Store) GetAgentLatencyBuckets(ctx context.Context, monitorID ID,
 		return nil, err
 	}
 	rows, err := s.dbRead.QueryContext(ctx, `SELECT agent_id,
-			(scheduled_at / ?) * ? AS bucket_at, AVG(latency_ms), COUNT(*)
+			(scheduled_at / ?) * ? AS bucket_at, AVG(latency_ms), AVG(speed_kbps), COUNT(*)
 		FROM results
 		WHERE monitor_id=? AND late=0 AND scheduled_at>=? AND scheduled_at<=?
 		GROUP BY agent_id, bucket_at ORDER BY bucket_at ASC`,
@@ -187,7 +195,7 @@ func (s *Store) GetAgentLatencyBuckets(ctx context.Context, monitorID ID,
 			pt       AgentLatencyPoint
 			bucketAt int64
 		)
-		if err = rows.Scan(&pt.AgentID, &bucketAt, &pt.AvgLatencyMs, &pt.Count); err != nil {
+		if err = rows.Scan(&pt.AgentID, &bucketAt, &pt.AvgLatencyMs, &pt.AvgSpeedKbps, &pt.Count); err != nil {
 			return nil, normalizeErr(err)
 		}
 		pt.BucketAt = fromUnixSec(bucketAt)

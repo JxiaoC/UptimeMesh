@@ -304,8 +304,13 @@ func (a *API) monitorStats(r *ghttp.Request) {
 	r.Response.WriteJsonExit(g.Map{"code": 0, "data": out})
 }
 
-// monitorAgentLatency 详情页分节点延时趋势:与 /stats 同时间段、同颗粒度、同桶边界,
+// monitorAgentLatency 详情页分节点趋势:与 /stats 同时间段、同颗粒度、同桶边界,
 // 前端按 bucketAt 对齐到同一横轴。
+//
+// 一次聚合同时带出两种口径(见 store.GetAgentLatencyBuckets):延时(ms)与下载速度
+// (KB/s),前端按监控类型取用 —— 下载速度监控的节点曲线画速度,其余画延时。
+// 接口不按类型裁剪:同一行结果本来就是同一次观测的两个侧面,给全由调用方选,
+// 比让后端猜"这个监控该看哪个"更少耦合。
 func (a *API) monitorAgentLatency(r *ghttp.Request) {
 	id, ok := parseHexID(r, "id")
 	if !ok {
@@ -327,6 +332,7 @@ func (a *API) monitorAgentLatency(r *ghttp.Request) {
 			"bucketAt":     p.BucketAt.Unix(),
 			"bucket":       bucketLabel(p.BucketAt, bucket),
 			"avgLatencyMs": round2(p.AvgLatencyMs),
+			"avgSpeedKbps": round2(p.AvgSpeedKbps),
 			"count":        p.Count,
 		})
 	}
