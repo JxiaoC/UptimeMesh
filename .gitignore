@@ -4,7 +4,6 @@ node_modules/
 *.exe
 .data/
 web/dist/
-docs
 # embed 目录默认忽略,但保留占位 index.html 保证 go:embed 编译种子存在
 dashboard/internal/webdist/dist/
 !dashboard/internal/webdist/dist/index.html
@@ -24,4 +23,4 @@ dashboard/manifest/data/
 # 测试代码不入库:仅保留在本地开发环境,不随发布分支/开源仓库分发
 *_test.go
 dashboard/internal/testutil/
-dashboard/internal/geoip/geoiptest/
+dashboard/internal/geoip/geoiptest/__pycache__/

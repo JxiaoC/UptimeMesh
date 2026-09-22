@@ -224,7 +224,7 @@ docs/             adr/（架构决策）、protocol.md（WS 帧契约）、logo/
 - 领域术语与口径：[`CONTEXT.md`](CONTEXT.md)
 - 架构决策：[`docs/adr/`](docs/adr/)
 - Agent ↔ Dashboard 帧协议：[`docs/protocol.md`](docs/protocol.md)
-- 协作约定（工单、标签、目录与提交规范）：[`AGENTS.md`](AGENTS.md)、[`docs/agents/`](docs/agents/)
+- 协作约定（工单、标签、目录与提交规范）：[`docs/agents/`](docs/agents/)
 - 前端新增任何面向用户的文本都必须国际化（`web/src/i18n/`，中英词条必须同时修改）。
 - 任何影响 Agent 二进制的改动（`agent/`、`shared/` 的 Go 代码及构建方式）都要让版本修订号 +1。
 

@@ -226,7 +226,7 @@ docs/             adr/ (decision records), protocol.md (WS frame contract), logo
 - Domain glossary and conventions: [`CONTEXT.md`](CONTEXT.md) (Chinese)
 - Architecture decision records: [`docs/adr/`](docs/adr/) (Chinese)
 - Agent ↔ Dashboard frame protocol: [`docs/protocol.md`](docs/protocol.md) (Chinese)
-- Collaboration conventions (issues, labels, layout, commit rules): [`AGENTS.md`](AGENTS.md), [`docs/agents/`](docs/agents/) (Chinese)
+- Collaboration conventions (issues, labels, layout, commit rules): [`docs/agents/`](docs/agents/) (Chinese)
 - Every new user-facing string in the frontend must be internationalized (`web/src/i18n/`; Chinese and English entries must be changed together).
 - Any change affecting the Agent binary (Go code under `agent/` or `shared/`, or how it is built) requires bumping the agent revision.
 

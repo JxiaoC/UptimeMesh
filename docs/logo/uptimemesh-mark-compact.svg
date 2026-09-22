@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512" role="img" aria-label="UptimeMesh">
+  <defs>
+    <linearGradient id="um-plate" gradientUnits="userSpaceOnUse"
+                    x1="0" y1="0" x2="179.20" y2="512">
+      <stop offset="0" stop-color="#0B1E33"/><stop offset="1" stop-color="#173C5C"/>
+    </linearGradient>
+    <linearGradient id="um-link" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#2D7FF9"/><stop offset="1" stop-color="#5CD3FF"/>
+    </linearGradient>
+    <linearGradient id="um-pulse" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#3DDC84"/><stop offset="0.55" stop-color="#7BEBAE"/>
+      <stop offset="1" stop-color="#3DDC84"/>
+    </linearGradient>
+    <radialGradient id="um-node" cx="0.35" cy="0.3" r="0.85">
+      <stop offset="0" stop-color="#5CD3FF"/><stop offset="1" stop-color="#1B5FD9"/>
+    </radialGradient>
+  </defs>
+    <polygon points="256.00,132.00 365.12,195.00 365.12,321.00 256.00,384.00 146.88,321.00 146.88,195.00 256.00,132.00" fill="none" stroke="#2D7FF9" stroke-width="16.0" stroke-linejoin="round"/>
+    <circle cx="256.0" cy="258.0" r="20.0" fill="#0E2233"/>
+    <circle cx="256.0" cy="132.0" r="30.0" fill="#1B5FD9" stroke="#BBD9FF" stroke-width="4"/>
+    <circle cx="365.1" cy="195.0" r="30.0" fill="#1B5FD9" stroke="#BBD9FF" stroke-width="4"/>
+    <circle cx="365.1" cy="321.0" r="30.0" fill="#F5A623" stroke="#FFD79A" stroke-width="4"/>
+    <circle cx="256.0" cy="384.0" r="30.0" fill="#1B5FD9" stroke="#BBD9FF" stroke-width="4"/>
+    <circle cx="146.9" cy="321.0" r="30.0" fill="#1B5FD9" stroke="#BBD9FF" stroke-width="4"/>
+    <circle cx="146.9" cy="195.0" r="30.0" fill="#1B5FD9" stroke="#BBD9FF" stroke-width="4"/>
+    <polyline points="78.00,258.00 168.00,258.00 216.00,150.00 266.00,366.00 300.00,258.00 434.00,258.00" fill="none" stroke="url(#um-pulse)" stroke-width="26.0" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

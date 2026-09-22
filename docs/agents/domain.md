@@ -1,0 +1,20 @@
+# Domain Docs
+
+How the engineering skills should consume this repo's domain documentation when exploring the codebase.
+
+## Before exploring, read these
+
+- **`CONTEXT.md`** at the repo root (single-context repo)
+- **`docs/adr/`**: read ADRs that touch the area you're about to work in.
+
+If any of these files don't exist, **proceed silently**.
+
+## Use the glossary's vocabulary
+
+When your output names a domain concept (in an issue title, a refactor proposal, a test name), use the term as defined in `CONTEXT.md`. Don't drift to synonyms the glossary explicitly avoids.
+
+Note: UI Chinese labels are 「监控」(Monitor) and 「节点」(Agent); code and API keep English terms.
+
+## Flag ADR conflicts
+
+If your output contradicts an existing ADR, surface it explicitly rather than silently overriding.
