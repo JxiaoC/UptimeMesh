@@ -1,11 +1,12 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, provide, ref } from 'vue'
+import { computed, onMounted, onUnmounted, provide, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
-import { TOKEN_KEY } from '../api/http'
-import { connected, onRealtime } from '../api/realtime'
+import { http, TOKEN_KEY } from '../api/http'
+import { connected, connectionId, onRealtime } from '../api/realtime'
 import LocaleSwitch from '../components/LocaleSwitch.vue'
 import MonitorDetailDialog from '../views/MonitorDetailDialog.vue'
+import { setFaviconAlertCount } from '../utils/favicon'
 
 const { t } = useI18n()
 const router = useRouter()
@@ -28,6 +29,87 @@ onMounted(() => {
 onUnmounted(() => off?.())
 provide('agentsVersion', agentsVersion)
 
+interface MonitorStatus { enabled: boolean; displayState: string }
+const alertCount = ref(0)
+let alertTimer: number | undefined
+let alertPollTimer: number | undefined
+let alertRefreshPending = false
+let alertRefreshRunning = false
+let alertRefreshAgain = false
+let alertSequence = 0
+
+function updateFavicon() {
+  setFaviconAlertCount(alertCount.value)
+}
+
+async function refreshAlertCount() {
+  if (alertRefreshRunning) {
+    alertRefreshAgain = true
+    return
+  }
+  alertRefreshRunning = true
+  const sequence = ++alertSequence
+  try {
+    const monitors = (await http.get('/overview')) as MonitorStatus[]
+    if (sequence === alertSequence) {
+      alertCount.value = monitors.filter((m) => m.enabled && m.displayState === 'DOWN').length
+      updateFavicon()
+    }
+  } catch {
+    // Keep the last known count during transient API failures.
+  } finally {
+    alertRefreshRunning = false
+    if (alertRefreshAgain) {
+      alertRefreshAgain = false
+      scheduleAlertRefresh()
+    }
+  }
+}
+
+function scheduleAlertRefresh() {
+  if (alertRefreshPending) return
+  alertRefreshPending = true
+  alertTimer = window.setTimeout(() => {
+    alertRefreshPending = false
+    void refreshAlertCount()
+  }, 400)
+}
+
+function startAlertPolling(live: boolean) {
+  if (alertPollTimer !== undefined) clearInterval(alertPollTimer)
+  alertPollTimer = window.setInterval(() => void refreshAlertCount(), live ? 30000 : 5000)
+}
+
+const alertEvents = [
+  'round_finalized',
+  'monitor_flipped',
+  'monitor_changed',
+  'monitors_changed',
+  'monitor_deleted',
+  'monitors_deleted',
+]
+let alertOffs: (() => void)[] = []
+onMounted(() => {
+  void refreshAlertCount()
+  alertOffs = alertEvents.map((event) => onRealtime(event, scheduleAlertRefresh))
+  startAlertPolling(connected.value)
+})
+watch(connected, (live) => {
+  startAlertPolling(live)
+  if (live) scheduleAlertRefresh()
+})
+watch(connectionId, (next, previous) => {
+  if (previous > 0 && next !== previous) scheduleAlertRefresh()
+})
+watch(alertCount, updateFavicon)
+onUnmounted(() => {
+  alertOffs.forEach((off) => off())
+  if (alertTimer !== undefined) clearTimeout(alertTimer)
+  if (alertPollTimer !== undefined) clearInterval(alertPollTimer)
+  alertSequence++
+  setFaviconAlertCount(0)
+})
+
 // 导航项放 computed:切语言后 t() 重新求值,菜单文案立即跟着变
 // (写成模块级常量只会在加载时求值一次)。
 const menu = computed(() => [
@@ -42,7 +124,10 @@ const menu = computed(() => [
 <template>
   <el-container style="height: 100vh">
     <el-aside width="200px">
-      <div class="brand">UptimeMesh</div>
+      <div class="brand">
+        <img src="/uptimemesh-mark.svg" alt="" />
+        <span>UptimeMesh</span>
+      </div>
       <!-- index 必须用绝对路径:相对路径在 /monitors/:id 下会被解析成 /monitors/xxx 导致导航失效 -->
       <el-menu :default-active="activeMenu" router>
         <el-menu-item v-for="m in menu" :key="m.index" :index="m.index">{{ m.label }}</el-menu-item>
@@ -83,10 +168,18 @@ const menu = computed(() => [
 
 <style scoped>
 .brand {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   font-weight: 700;
   font-size: 18px;
   padding: 16px;
   color: #303133;
+}
+.brand img {
+  width: 24px;
+  height: 24px;
+  flex: none;
 }
 .topbar {
   display: flex;

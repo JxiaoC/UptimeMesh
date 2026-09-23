@@ -571,7 +571,7 @@ defineExpose({ open })
              但不给内容类断言(期望状态码/关键字/JSON 断言)——判定对象是速度。 -->
         <el-form-item :label="t('monitorForm.downloadUrl')" required>
           <el-input v-model="form.url" placeholder="https://example.com/file.bin" />
-          <div class="tip" style="display:block; margin-left:0">{{ t('monitorForm.downloadTip') }}</div>
+          <div class="tip download-url-tip">{{ t('monitorForm.downloadTip') }}</div>
         </el-form-item>
         <el-form-item :label="t('monitorForm.method')">
           <el-select v-model="form.method" style="width:120px">
@@ -756,6 +756,7 @@ defineExpose({ open })
 .tip { margin-left: 10px; color: #909399; font-size: 12px; }
 /* IP 协议提示:没选可行协议族时标黄,这条监控会在所有节点上稳定失败。 */
 .ip-version-tip { margin-top: 4px; line-height: 1.6; }
+.download-url-tip { display: block; margin: 4px 0 0; line-height: 1.6; }
 .ip-version-tip.warn { color: #e6a23c; }
 .json-assert { width: 100%; }
 .json-assert-row { display: flex; gap: 8px; margin-top: 8px; }
