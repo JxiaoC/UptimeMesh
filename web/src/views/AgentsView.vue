@@ -264,6 +264,7 @@ const defaultServer = (() => {
 })()
 
 const installVisible = ref(false)
+const installMode = ref<'install' | 'uninstall'>('install')
 const installForm = ref({ server: defaultServer, key: '', name: '' })
 
 // 旧库仅存哈希时设置接口不回传明文,此时提示去设置页轮换;否则留空由脚本交互输入。
@@ -300,6 +301,19 @@ const installCmd = computed(() => {
   return parts.join(' ')
 })
 
+const uninstallCmd = computed(() =>
+  `curl -fsSL ${location.origin}/api/v1/agent/install.sh | sudo sh -s -- --uninstall`,
+)
+
+async function copyUninstall() {
+  try {
+    await navigator.clipboard.writeText(uninstallCmd.value)
+    ElMessage.success(t('agents.uninstallCopied'))
+  } catch {
+    ElMessage.warning(t('agents.clipboardDenied'))
+  }
+}
+
 async function copyInstall() {
   if (!installCmd.value) {
     ElMessage.warning(t('agents.needServer'))
@@ -329,7 +343,7 @@ async function copyInstall() {
             {{ t('agents.upgradeAll') }}<span v-if="eligible.length">({{ eligible.length }})</span>
           </el-button>
         </el-tooltip>
-        <el-button type="primary" @click="openInstall">{{ t('agents.copyInstallCmd') }}</el-button>
+        <el-button type="primary" @click="openInstall">{{ t('agents.copyInstallUninstallCmd') }}</el-button>
         <el-button :loading="loading" @click="load()">{{ t('common.refresh') }}</el-button>
       </div>
     </div>
@@ -428,31 +442,48 @@ async function copyInstall() {
     </el-table>
 
     <el-dialog v-model="installVisible" :title="t('agents.installTitle')" width="640px">
-      <!-- 段落里有 <b>Linux</b>,故走 i18n-t 的具名插槽,避免把 HTML 拼进词条 -->
-      <i18n-t keypath="agents.installIntro" tag="p" scope="global" style="margin-top:0;color:#909399;font-size:13px">
-        <template #linux><b>Linux</b></template>
-      </i18n-t>
-      <el-form label-width="90px">
-        <el-form-item :label="t('agents.installServer')">
-          <el-input v-model="installForm.server" :placeholder="t('agents.installServerPlaceholder')" />
-        </el-form-item>
-        <el-form-item :label="t('agents.installKey')">
-          <el-input v-model="installForm.key" :placeholder="keyPlaceholder" />
-        </el-form-item>
-        <el-form-item :label="t('agents.installName')">
-          <el-input v-model="installForm.name" :placeholder="t('agents.installNamePlaceholder')" />
-        </el-form-item>
-      </el-form>
-      <el-input
-        :model-value="installCmd"
-        type="textarea"
-        :rows="3"
-        readonly
-        style="font-family:monospace"
-      />
+      <el-segmented v-model="installMode" :options="[
+        { label: t('agents.installModeInstall'), value: 'install' },
+        { label: t('agents.installModeUninstall'), value: 'uninstall' },
+      ]" style="margin-bottom:16px" />
+      <template v-if="installMode === 'install'">
+        <!-- 段落里有 <b>Linux</b>,故走 i18n-t 的具名插槽,避免把 HTML 拼进词条 -->
+        <i18n-t keypath="agents.installIntro" tag="p" scope="global" style="margin-top:0;color:#909399;font-size:13px">
+          <template #linux><b>Linux</b></template>
+        </i18n-t>
+        <el-form label-width="90px">
+          <el-form-item :label="t('agents.installServer')">
+            <el-input v-model="installForm.server" :placeholder="t('agents.installServerPlaceholder')" />
+          </el-form-item>
+          <el-form-item :label="t('agents.installKey')">
+            <el-input v-model="installForm.key" :placeholder="keyPlaceholder" />
+          </el-form-item>
+          <el-form-item :label="t('agents.installName')">
+            <el-input v-model="installForm.name" :placeholder="t('agents.installNamePlaceholder')" />
+          </el-form-item>
+        </el-form>
+        <el-input
+          :model-value="installCmd"
+          type="textarea"
+          :rows="3"
+          readonly
+          style="font-family:monospace"
+        />
+      </template>
+      <template v-else>
+        <p class="dialog-hint">{{ t('agents.uninstallIntro') }}</p>
+        <el-input
+          :model-value="uninstallCmd"
+          type="textarea"
+          :rows="2"
+          readonly
+          style="font-family:monospace"
+        />
+      </template>
       <template #footer>
         <el-button @click="installVisible = false">{{ t('common.close') }}</el-button>
-        <el-button type="primary" :disabled="!installCmd" @click="copyInstall">{{ t('agents.copyCommand') }}</el-button>
+        <el-button v-if="installMode === 'install'" type="primary" :disabled="!installCmd" @click="copyInstall">{{ t('agents.copyCommand') }}</el-button>
+        <el-button v-else type="danger" @click="copyUninstall">{{ t('agents.copyUninstallCommand') }}</el-button>
       </template>
     </el-dialog>
 
