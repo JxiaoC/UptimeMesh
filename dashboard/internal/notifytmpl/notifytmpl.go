@@ -9,14 +9,18 @@ import (
 )
 
 // 通知事件类型,与 alert.Event / Payload.Event 取值一致。
+// DOWN/UP 是监控告警的翻转事件;AGENT_DOWN/AGENT_UP 是节点(Agent)掉线/恢复上线
+// 事件(见 internal/agentnotify),与监控事件共用一套渠道、模板与投递记录。
 const (
-	EventDown = "DOWN" // 触发告警
-	EventUp   = "UP"   // 恢复正常
-	EventTest = "TEST" // 渠道测试发送
+	EventDown      = "DOWN"        // 触发告警
+	EventUp        = "UP"          // 恢复正常
+	EventTest      = "TEST"        // 渠道测试发送
+	EventAgentDown = "AGENT_DOWN"  // 节点掉线
+	EventAgentUp   = "AGENT_UP"    // 节点恢复上线
 )
 
 // Events 设置页展示顺序,也是允许配置的事件全集。
-var Events = []string{EventDown, EventUp, EventTest}
+var Events = []string{EventDown, EventUp, EventTest, EventAgentDown, EventAgentUp}
 
 // Template 单条消息模板。标题与正文都可含 {{变量}} 占位符。
 type Template struct {
@@ -45,14 +49,22 @@ type Vars struct {
 	// Duration 是本次报警的持续时长(形如 "5 分 30 秒"):只有恢复(UP)事件有值,
 	// 由调度器回查上一条 DOWN 记录算出(见 scheduler.alarmDurationSec)。
 	// DOWN/TEST 事件与查不到起点时为空串 —— 模板里渲染成空,不会残留花括号。
+	// 节点事件复用它:AGENT_UP 带本次离线时长(掉线通知发出到重连),其余为空。
 	Duration string
-	Timestamp string
+	// AgentID / AgentName / AgentPlatform / AgentIP 是节点事件(AGENT_DOWN/AGENT_UP)
+	// 专属变量:监控事件里渲染成空串。Platform 形如 "linux/amd64"。
+	AgentID      string
+	AgentName    string
+	AgentPlatform string
+	AgentIP      string
+	Timestamp    string
 }
 
 // Placeholders 支持的占位符名(不含花括号),供文档与前端提示复用。
 var Placeholders = []string{
 	"monitorName", "monitorId", "monitorType", "url", "event", "successRate", "speed",
 	"agents", "errorCount", "duration", "timestamp",
+	"agentName", "agentId", "agentPlatform", "agentIP",
 }
 
 // BodyPlaceholders 自定义 webhook 请求体模板可用占位符:
@@ -72,6 +84,9 @@ func SampleVars() Vars {
 		// 样例文案不参与本地化(后端文案恒为中文)。
 		// 时间是示例值,故直接写字面量。
 		Timestamp: "2026-09-12 10:00:00",
+		// 节点事件变量的示例值:设置页预览 AGENT_DOWN/AGENT_UP 模板时用。
+		AgentID: "6aa3eaea721b7851dac0d93e", AgentName: "北京-节点-01",
+		AgentPlatform: "linux/amd64", AgentIP: "203.0.113.7",
 	}
 }
 
@@ -108,6 +123,20 @@ func Defaults() map[string]Template {
 		EventTest: {
 			Title:   "【测试】UptimeMesh 通知",
 			Content: "这是一条测试消息,用于验证通知渠道是否可用。\n时间:{{timestamp}}",
+		},
+		// 节点掉线/恢复(见 internal/agentnotify):正文带平台与来源 IP,
+		// 值班的人不必回面板查就能确认是哪台机器;恢复通知多一行「离线持续时长」,
+		// 只有掉线通知实际发出过才有值(防抖期内闪断恢复不发任何通知)。
+		EventAgentDown: {
+			Title: "【节点离线】{{agentName}}",
+			Content: "节点「{{agentName}}」已掉线,超过延迟确认时间仍未上线。\n" +
+				"平台:{{agentPlatform}}\n来源 IP:{{agentIP}}\n时间:{{timestamp}}",
+		},
+		EventAgentUp: {
+			Title: "【节点恢复】{{agentName}}",
+			Content: "节点「{{agentName}}」已恢复上线。\n" +
+				"平台:{{agentPlatform}}\n来源 IP:{{agentIP}}\n" +
+				"离线持续时长:{{duration}}\n时间:{{timestamp}}",
 		},
 	}
 }
@@ -193,6 +222,10 @@ func Render(t Template, v Vars) Template {
 		"{{errorCount}}", v.ErrorCount,
 		"{{duration}}", v.Duration,
 		"{{timestamp}}", v.Timestamp,
+		"{{agentId}}", v.AgentID,
+		"{{agentName}}", v.AgentName,
+		"{{agentPlatform}}", v.AgentPlatform,
+		"{{agentIP}}", v.AgentIP,
 	)
 	return Template{Title: r.Replace(t.Title), Content: r.Replace(t.Content)}
 }
@@ -214,6 +247,10 @@ func RenderBody(body string, v Vars, title, content string) string {
 		"{{errorCount}}", jsonEscape(v.ErrorCount),
 		"{{duration}}", jsonEscape(v.Duration),
 		"{{timestamp}}", jsonEscape(v.Timestamp),
+		"{{agentId}}", jsonEscape(v.AgentID),
+		"{{agentName}}", jsonEscape(v.AgentName),
+		"{{agentPlatform}}", jsonEscape(v.AgentPlatform),
+		"{{agentIP}}", jsonEscape(v.AgentIP),
 		"{{title}}", jsonEscape(title),
 		"{{content}}", jsonEscape(content),
 	).Replace(body)

@@ -56,8 +56,11 @@ type Agent struct {
 	// IPv4Available / IPv6Available 是节点自报的本机网络族可用性(hello 与心跳都会
 	// 带;见 shared/agentclient.DetectIPFamilies)。nil = 老版本 Agent 从未上报 ——
 	// 页面显示"未知"而不是"不支持",两者含义完全不同。
-	IPv4Available *bool     `json:"ipv4Available,omitempty"`
-	IPv6Available *bool     `json:"ipv6Available,omitempty"`
+	IPv4Available *bool `json:"ipv4Available,omitempty"`
+	IPv6Available *bool `json:"ipv6Available,omitempty"`
+	// OfflineNotify 掉线推送开关:该节点掉线(延迟确认后)与恢复上线时是否向
+	// 「节点通知渠道」发推送(见 internal/agentnotify 与 .scratch/agent-offline-notify/spec.md)。
+	OfflineNotify bool      `json:"offlineNotify"`
 	LastSeen      time.Time `json:"lastSeen"`
 	CreatedAt     time.Time `json:"createdAt"`
 	UpdatedAt     time.Time `json:"updatedAt"`
@@ -86,7 +89,7 @@ var ErrAgentRevoked = errors.New("节点已被吊销")
 // agentCols agents 表的显式列顺序,与 scanAgent 一一对应。
 const agentCols = `id, name, enroll_name, version, os, arch, source_ip, status, credential_hash,
 	cred_plain, capabilities, ipv4_available, ipv6_available, country, region, region_ip_cache,
-	last_seen, created_at, updated_at`
+	offline_notify, last_seen, created_at, updated_at`
 
 func scanAgent(row interface{ Scan(...any) error }) (*Agent, error) {
 	var (
@@ -101,7 +104,7 @@ func scanAgent(row interface{ Scan(...any) error }) (*Agent, error) {
 	)
 	err := row.Scan(&a.ID, &a.Name, &a.EnrollName, &a.Version, &a.OS, &a.Arch, &a.SourceIP, &a.Status,
 		&a.CredentialHash, &credPlain, &caps, &ipv4, &ipv6, &a.Country, &a.Region,
-		&a.RegionIPCache, &lastSeen, &createdAt, &updatedAt)
+		&a.RegionIPCache, &a.OfflineNotify, &lastSeen, &createdAt, &updatedAt)
 	if err != nil {
 		return nil, normalizeErr(err)
 	}
@@ -150,12 +153,12 @@ func (s *Store) InsertAgent(ctx context.Context, a *Agent) error {
 	}
 	a.CreatedAt, a.UpdatedAt, a.LastSeen = now, now, now
 	_, err := s.db.ExecContext(ctx, `INSERT INTO agents (`+agentCols+`)
-		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		a.ID, a.Name, a.EnrollName, a.Version, a.OS, a.Arch, a.SourceIP, a.Status, a.CredentialHash,
 		nullStr(a.CredPlain), capabilitiesJSON(a.Capabilities),
 		boolArg(a.IPv4Available), boolArg(a.IPv6Available),
 		a.Country, a.Region, a.RegionIPCache,
-		unixSec(a.LastSeen), unixSec(a.CreatedAt), unixSec(a.UpdatedAt))
+		a.OfflineNotify, unixSec(a.LastSeen), unixSec(a.CreatedAt), unixSec(a.UpdatedAt))
 	return normalizeErr(err)
 }
 
@@ -395,6 +398,13 @@ func (s *Store) SetAgentRegion(ctx context.Context, id ID, region string) error 
 func (s *Store) SetAgentName(ctx context.Context, id ID, name string) error {
 	_, err := s.db.ExecContext(ctx, `UPDATE agents SET name=?, updated_at=? WHERE id=?`,
 		name, unixSec(time.Now()), id)
+	return normalizeErr(err)
+}
+
+// SetAgentOfflineNotify 设置节点的掉线推送开关(见 internal/agentnotify)。
+func (s *Store) SetAgentOfflineNotify(ctx context.Context, id ID, on bool) error {
+	_, err := s.db.ExecContext(ctx, `UPDATE agents SET offline_notify=?, updated_at=? WHERE id=?`,
+		on, unixSec(time.Now()), id)
 	return normalizeErr(err)
 }
 

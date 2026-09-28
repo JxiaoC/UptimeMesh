@@ -32,6 +32,25 @@ const (
 	MaxStatusStripRounds     = 200
 )
 
+// 节点掉线推送的延迟确认秒数(见 internal/agentnotify):掉线后等待这么久仍未上线
+// 才发 AGENT_DOWN。0 = 立即发(不要延迟);上限 1 小时,再长"掉线通知"就失去时效。
+// 默认 60 秒:节点闪断后重连退避 1s→30s,绝大多数秒级抖动都能在一个周期内恢复。
+const (
+	DefaultAgentOfflineNotifySeconds = 60
+	MaxAgentOfflineNotifySeconds     = 3600
+)
+
+// NormalizeAgentOfflineNotifySeconds 归一化延迟秒数:负数与越界分别收口到 0 与上限。
+func NormalizeAgentOfflineNotifySeconds(sec int) int {
+	if sec < 0 {
+		return 0
+	}
+	if sec > MaxAgentOfflineNotifySeconds {
+		return MaxAgentOfflineNotifySeconds
+	}
+	return sec
+}
+
 // NormalizeStatusStripRounds 归一化格数:未配置(0,老库补列后的值)或越界一律回落默认值
 // —— 0 格会让列表页状态条整列空白,不能直接把库里的值当结果用。
 func NormalizeStatusStripRounds(rounds int) int {
@@ -59,6 +78,24 @@ func (s *Store) SetStatusStripRounds(ctx context.Context, rounds int) error {
 	return normalizeErr(err)
 }
 
+// AgentOfflineNotifySeconds 读取节点掉线推送的延迟确认秒数;读不到(库异常)回落默认值,
+// 让掉线推送在任何情况下都有可用的延迟口径。
+func (s *Store) AgentOfflineNotifySeconds(ctx context.Context) int {
+	st, err := s.GetSettings(ctx)
+	if err != nil {
+		return DefaultAgentOfflineNotifySeconds
+	}
+	return NormalizeAgentOfflineNotifySeconds(st.AgentOfflineNotifySeconds)
+}
+
+// SetAgentOfflineNotifySeconds 更新节点掉线推送的延迟确认秒数(0–3600,API 层校验)。
+func (s *Store) SetAgentOfflineNotifySeconds(ctx context.Context, sec int) error {
+	_, err := s.db.ExecContext(ctx,
+		`UPDATE settings SET agent_offline_notify_seconds=?, updated_at=? WHERE id=?`,
+		NormalizeAgentOfflineNotifySeconds(sec), unixSec(time.Now()), settingsID)
+	return normalizeErr(err)
+}
+
 // Settings 是全局配置:接入密钥(票 01)、JWT 密钥(票 02)、
 // 轮次收集宽限期(票 06)、数据保留期(票 09)、最近状态格数(监控列表页状态条)。
 //
@@ -74,10 +111,13 @@ type Settings struct {
 	ResultRetentionDays int    `json:"resultRetentionDays"`
 	// StatusStripRounds 是监控列表页「最近状态」的格数;0 = 未配置(用 DefaultStatusStripRounds),
 	// 读出时统一走 StatusStripRounds()/NormalizeStatusStripRounds 归一化。
-	StatusStripRounds int                            `json:"statusStripRounds"`
-	NotifyTemplates   map[string]notifytmpl.Template `json:"notifyTemplates,omitempty"`
-	CreatedAt         time.Time                      `json:"createdAt"`
-	UpdatedAt         time.Time                      `json:"updatedAt"`
+	StatusStripRounds int `json:"statusStripRounds"`
+	// AgentOfflineNotifySeconds 是节点掉线推送的延迟确认秒数(0 = 立即),
+	// 读出时统一走 NormalizeAgentOfflineNotifySeconds 归一化。
+	AgentOfflineNotifySeconds int                            `json:"agentOfflineNotifySeconds"`
+	NotifyTemplates           map[string]notifytmpl.Template `json:"notifyTemplates,omitempty"`
+	CreatedAt                 time.Time                      `json:"createdAt"`
+	UpdatedAt                 time.Time                      `json:"updatedAt"`
 }
 
 func HashSecret(s string) string {
@@ -95,8 +135,8 @@ func NewEnrollmentKey() (string, error) {
 }
 
 const settingsCols = `id, enrollment_key_hash, enrollment_key, jwt_secret,
-	round_grace_seconds, result_retention_days, status_strip_rounds, notify_templates,
-	created_at, updated_at`
+	round_grace_seconds, result_retention_days, status_strip_rounds, agent_offline_notify_seconds,
+	notify_templates, created_at, updated_at`
 
 func scanSettings(row interface{ Scan(...any) error }) (*Settings, error) {
 	var (
@@ -106,8 +146,8 @@ func scanSettings(row interface{ Scan(...any) error }) (*Settings, error) {
 		updatedAt int64
 	)
 	err := row.Scan(&st.ID, &st.EnrollmentKeyHash, &st.EnrollmentKey, &st.JWTSecret,
-		&st.RoundGraceSeconds, &st.ResultRetentionDays, &st.StatusStripRounds, &templates,
-		&createdAt, &updatedAt)
+		&st.RoundGraceSeconds, &st.ResultRetentionDays, &st.StatusStripRounds,
+		&st.AgentOfflineNotifySeconds, &templates, &createdAt, &updatedAt)
 	if err != nil {
 		return nil, normalizeErr(err)
 	}
@@ -139,9 +179,10 @@ func (s *Store) EnsureSettings(ctx context.Context) (createdKey string, err erro
 	}
 	now := unixSec(time.Now())
 	_, err = s.db.ExecContext(ctx, `INSERT INTO settings (`+settingsCols+`)
-		VALUES (?,?,?,?,?,?,?,?,?,?)`,
+		VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
 		settingsID, HashSecret(key), key, hex.EncodeToString(jwtSecret),
-		5, DefaultResultRetentionDays, DefaultStatusStripRounds, nil, now, now)
+		5, DefaultResultRetentionDays, DefaultStatusStripRounds, DefaultAgentOfflineNotifySeconds,
+		nil, now, now)
 	if errors.Is(err, ErrDuplicate) {
 		return "", nil // 并发下另一实例已创建
 	}

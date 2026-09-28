@@ -45,6 +45,8 @@ type agentView struct {
 	// null = 老版本 Agent 从未上报,页面显示「未知」而不是「不支持」。
 	IPv4Available *bool `json:"ipv4Available"`
 	IPv6Available *bool `json:"ipv6Available"`
+	// OfflineNotify 掉线推送开关(节点级,见 internal/agentnotify)。
+	OfflineNotify bool `json:"offlineNotify"`
 }
 
 // listAgents 支持 ?status=pending|approved|revoked 过滤;默认返回全部未删除节点。
@@ -139,6 +141,7 @@ func (a *API) toView(ctx context.Context, ag *store.Agent) agentView {
 		Upgradable:    outdated && ag.Supports(protocol.CapSelfUpgrade),
 		IPv4Available: ag.IPv4Available,
 		IPv6Available: ag.IPv6Available,
+		OfflineNotify: ag.OfflineNotify,
 	}
 }
 
@@ -172,6 +175,31 @@ func (a *API) updateAgentRegion(r *ghttp.Request) {
 
 // regionRe 校验 alpha-2 地域码形状;具体码是否真实存在由前端下拉保证。
 var regionRe = regexp.MustCompile(`^[A-Z]{2}$`)
+
+// updateAgentOfflineNotify 切换节点的掉线推送开关:{"offlineNotify": true}。
+// 与改名/改地域同一套小接口范式;仅已批准节点可切换(pending/revoked 的连接断开
+// 是正常流转,不存在"掉线通知"的语义,前端也不给这些行渲染开关)。
+func (a *API) updateAgentOfflineNotify(r *ghttp.Request) {
+	id, ok := parseAgentID(r)
+	if !ok {
+		return
+	}
+	ag, err := a.Store.FindAgentByID(r.Context(), id)
+	if err != nil {
+		r.Response.WriteJsonExit(g.Map{"code": 404, "message": "节点不存在"})
+		return
+	}
+	if ag.Status != store.AgentApproved {
+		r.Response.WriteJsonExit(g.Map{"code": 400, "message": "仅已批准节点可设置掉线推送"})
+		return
+	}
+	on := r.Get("offlineNotify").Bool()
+	if err := a.Store.SetAgentOfflineNotify(r.Context(), id, on); err != nil {
+		r.Response.WriteJsonExit(g.Map{"code": 500, "message": "保存失败"})
+		return
+	}
+	r.Response.WriteJsonExit(g.Map{"code": 0, "message": "已保存", "data": g.Map{"offlineNotify": on}})
+}
 
 // agentNameMaxRunes 是展示名的长度上限(按 rune 计)。节点名多半来自主机名(上限 63),
 // 留一点余量;这里只是防呆,不参与身份判定。

@@ -25,6 +25,8 @@ export default {
       DOWN: '告警触发',
       UP: '恢复通知',
       TEST: '测试消息',
+      AGENT_DOWN: '节点离线',
+      AGENT_UP: '节点恢复',
     },
     // 尝试次数(重试过的才提示):「重试 N 次」指首次之外又试了 N 次。
     attemptsN: '共尝试 {n} 次',

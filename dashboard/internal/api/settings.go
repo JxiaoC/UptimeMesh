@@ -28,6 +28,8 @@ func (a *API) registerSettingsRoutes(group *ghttp.RouterGroup) {
 	// 监控列表页「最近状态」一列的格数(后台可配,默认 50)。
 	group.PUT("/settings/status-strip", a.setStatusStripRounds)
 	group.PUT("/settings/notify-templates", a.setNotifyTemplates)
+	// 节点掉线推送的延迟确认秒数(0–3600,0 = 立即;见 internal/agentnotify)。
+	group.PUT("/settings/agent-offline-notify", a.setAgentOfflineNotifySeconds)
 	// 安全(设置页「安全」标签):查看与修改后台登录账号密码。
 	group.GET("/settings/account", a.getAccount)
 	group.PUT("/settings/account", a.updateAccount)
@@ -70,9 +72,12 @@ func (a *API) getSettings(r *ghttp.Request) {
 		"statusStripMin":           store.MinStatusStripRounds,
 		"statusStripMax":           store.MaxStatusStripRounds,
 		"statusStripDefault":       store.DefaultStatusStripRounds,
-		"enrollmentKey":            st.EnrollmentKey,
-		"notifyTemplates":          notifytmpl.Resolve(st.NotifyTemplates),
-		"notifyPlaceholders":       notifytmpl.Placeholders,
+		// 节点掉线推送的延迟确认秒数与取值范围(前端输入框的上下限据此生成)。
+		"agentOfflineNotifySeconds": store.NormalizeAgentOfflineNotifySeconds(st.AgentOfflineNotifySeconds),
+		"agentOfflineNotifyMax":     store.MaxAgentOfflineNotifySeconds,
+		"enrollmentKey":             st.EnrollmentKey,
+		"notifyTemplates":           notifytmpl.Resolve(st.NotifyTemplates),
+		"notifyPlaceholders":        notifytmpl.Placeholders,
 	}})
 }
 
@@ -279,6 +284,30 @@ func (a *API) setStatusStripRounds(r *ghttp.Request) {
 	}
 	r.Response.WriteJsonExit(g.Map{"code": 0, "message": "已保存", "data": g.Map{
 		"statusStripRounds": req.StatusStripRounds,
+	}})
+}
+
+// setAgentOfflineNotifySeconds 保存节点掉线推送的延迟确认秒数
+// (PUT /settings/agent-offline-notify):{"agentOfflineNotifySeconds": 60}。
+// 0 = 掉线立即发通知(不要防抖);上限 1 小时,再长"掉线通知"就失去时效。
+// 保存后立即生效:防抖服务每次事件都现查设置,不缓存旧值(见 internal/agentnotify)。
+func (a *API) setAgentOfflineNotifySeconds(r *ghttp.Request) {
+	var req struct {
+		AgentOfflineNotifySeconds int `json:"agentOfflineNotifySeconds"`
+	}
+	if err := r.Parse(&req); err != nil ||
+		req.AgentOfflineNotifySeconds < 0 ||
+		req.AgentOfflineNotifySeconds > store.MaxAgentOfflineNotifySeconds {
+		r.Response.WriteJsonExit(g.Map{"code": 400, "message": "延迟秒数须在 0~" +
+			strconv.Itoa(store.MaxAgentOfflineNotifySeconds) + " 之间"})
+		return
+	}
+	if err := a.Store.SetAgentOfflineNotifySeconds(r.Context(), req.AgentOfflineNotifySeconds); err != nil {
+		r.Response.WriteJsonExit(g.Map{"code": 500, "message": "更新失败"})
+		return
+	}
+	r.Response.WriteJsonExit(g.Map{"code": 0, "message": "已保存", "data": g.Map{
+		"agentOfflineNotifySeconds": req.AgentOfflineNotifySeconds,
 	}})
 }
 

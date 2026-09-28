@@ -8,6 +8,7 @@ import (
 
 	"github.com/gogf/gf/v2/frame/g"
 
+	"github.com/uptimemesh/dashboard/internal/agentnotify"
 	"github.com/uptimemesh/dashboard/internal/alert"
 	"github.com/uptimemesh/dashboard/internal/api"
 	"github.com/uptimemesh/dashboard/internal/auth"
@@ -68,10 +69,16 @@ func main() {
 	}
 	app := &api.API{Store: st, Hub: h, JWT: auth.NewService(jwtSecret), Web: web, Geo: geo}
 
+	// 节点掉线推送(防抖见 internal/agentnotify):在浏览器广播之后追加处理,
+	// 共用同一条 OnAgentChange 回调。isOnline 注入 hub 的在线判定,防抖到点重查用。
+	n := notifier.New(st)
+	agentNotify := agentnotify.New(st, n, h.IsOnline)
+
 	// 节点上下线实时广播(票 10)。
 	h.OnAgentChange = func(agentID store.ID, name string, online bool) {
 		web.Broadcast(webhub.Event{Type: webhub.EvAgentChanged,
 			Data: webhub.AgentChangedData{AgentID: agentID.Hex(), Name: name, Online: online}})
+		agentNotify.OnAgentChange(ctx, agentID, online)
 	}
 	// 一键升级结果只落日志:成功时节点随即重启,新版本由下一次 hello 落库并在节点页
 	// 体现;失败原因(无写权限、下载地址不可达、校验和不符)对排障很关键。
@@ -92,7 +99,6 @@ func main() {
 	// 节点随后重连回来时这一轮往往还开着,补发能把它救回成真实结果,而不是白等一个
 	// 超时后按"未下发 ⇒ 不计分母"收口(见 scheduler.AgentOnline)。
 	h.OnAgentConnected = func(agentID store.ID, _ string) { sched.AgentOnline(agentID) }
-	n := notifier.New(st)
 	sched.OnRoundFinalized = func(ctx context.Context, m *store.Monitor, agg scheduler.Aggregation, ev *alert.Event, monState *store.MonitorState) {
 		// 每轮定稿推送浏览器(载荷含列表页增量更新所需的状态与状态条单元);
 		// 告警翻转时另发 monitor_flipped 与 webhook。

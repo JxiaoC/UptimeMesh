@@ -61,6 +61,8 @@ func (a *API) Register(s *ghttp.Server) {
 			prot.PUT("/agents/{id}/region", a.updateAgentRegion)
 			// 后台改展示名(不动身份键,见 updateAgentName)。
 			prot.PUT("/agents/{id}/name", a.updateAgentName)
+			// 掉线推送开关(节点级,见 internal/agentnotify)。
+			prot.PUT("/agents/{id}/offline-notify", a.updateAgentOfflineNotify)
 			prot.DELETE("/agents/{id}", a.deleteAgent)
 			a.registerMonitorRoutes(prot)
 			a.registerRoundRoutes(prot)

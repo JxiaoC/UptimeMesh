@@ -48,6 +48,11 @@ const settings: typeof zhSettings = {
       help: 'How many round cells the "Recent status" column on the monitors page shows: {min}–{max}, {def} by default. More cells reveal a longer trend, but the column gets wider and the page renders more; the new count applies when you return to the monitors page.',
       saved: 'Saved — the monitors page will use the new cell count',
     },
+    agentOfflineNotify: {
+      label: 'Agent offline alert delay',
+      help: 'How long an agent must stay offline before the offline webhook is sent: 0–{max} seconds (0 = send immediately). The delay filters out false alarms from brief network blips; 60 seconds by default. Applies immediately after saving. The back-online notice is not delayed.',
+      saved: 'Saved — agent offline alerts will use the new confirmation delay',
+    },
     grace: {
       label: 'Round collection grace period',
       value: '{seconds} seconds (a round is finalized at probe timeout + grace period)',
@@ -91,6 +96,8 @@ const settings: typeof zhSettings = {
       DOWN: 'Alert fired (DOWN)',
       UP: 'Recovery notice (UP)',
       TEST: 'Test message (TEST)',
+      AGENT_DOWN: 'Agent offline (AGENT_DOWN)',
+      AGENT_UP: 'Agent back online (AGENT_UP)',
     },
     db: {
       // On demand: entering the settings page does not measure automatically (the backend has to COUNT(*) every table); usage is fetched only when "View usage" is clicked.

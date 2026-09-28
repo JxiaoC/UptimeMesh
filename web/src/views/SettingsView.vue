@@ -17,6 +17,9 @@ interface Settings {
   statusStripMin: number
   statusStripMax: number
   statusStripDefault: number
+  // 节点掉线推送的延迟确认秒数(0 = 立即),以及上限(输入框 max 由后端给出)。
+  agentOfflineNotifySeconds: number
+  agentOfflineNotifyMax: number
   enrollmentKey: string
   notifyTemplates: Record<string, NotifyTemplate>
   notifyPlaceholders: string[]
@@ -31,6 +34,8 @@ const eventLabels = computed<Record<string, string>>(() => ({
   DOWN: t('settings.events.DOWN'),
   UP: t('settings.events.UP'),
   TEST: t('settings.events.TEST'),
+  AGENT_DOWN: t('settings.events.AGENT_DOWN'),
+  AGENT_UP: t('settings.events.AGENT_UP'),
 }))
 
 interface DBStats {
@@ -787,6 +792,22 @@ async function saveStatusStrip() {
   }
 }
 
+// saveAgentOfflineNotify 保存节点掉线推送的延迟确认秒数。立即生效:
+// 防抖服务每次节点上下线事件都现查设置(见 internal/agentnotify)。
+const savingAgentNotify = ref(false)
+async function saveAgentOfflineNotify() {
+  if (!settings.value) return
+  savingAgentNotify.value = true
+  try {
+    await http.put('/settings/agent-offline-notify', {
+      agentOfflineNotifySeconds: settings.value.agentOfflineNotifySeconds,
+    })
+    ElMessage.success(t('settings.agentOfflineNotify.saved'))
+  } catch { /* 拦截器已提示 */ } finally {
+    savingAgentNotify.value = false
+  }
+}
+
 async function rotateKey() {
   await confirmBox(
     t('settings.key.rotateConfirm'),
@@ -871,6 +892,21 @@ async function resetTemplate() {
                   max: settings.statusStripMax,
                   def: settings.statusStripDefault,
                 }) }}
+              </p>
+            </div>
+          </el-form-item>
+          <el-form-item :label="t('settings.agentOfflineNotify.label')">
+            <div style="width:100%">
+              <el-input-number
+                v-model="settings.agentOfflineNotifySeconds"
+                :min="0"
+                :max="settings.agentOfflineNotifyMax"
+                :step="30"
+              />
+              <el-button style="margin-left:12px" type="primary" plain
+                :loading="savingAgentNotify" @click="saveAgentOfflineNotify">{{ t('common.save') }}</el-button>
+              <p style="color:#909399;font-size:12px;margin:6px 0 0">
+                {{ t('settings.agentOfflineNotify.help', { max: settings.agentOfflineNotifyMax }) }}
               </p>
             </div>
           </el-form-item>

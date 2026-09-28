@@ -14,7 +14,7 @@ interface NotificationLog {
   channelName: string
   monitorId: string
   monitorName: string
-  /** 事件类型:DOWN | UP | TEST(接口契约值,不翻译)。 */
+  /** 事件类型:DOWN | UP | TEST | AGENT_DOWN | AGENT_UP(接口契约值,不翻译)。 */
   event: string
   /** 发送状态:success | failed(接口契约值)。 */
   status: string
@@ -52,6 +52,8 @@ const eventOptions = computed(() => [
   { value: 'DOWN', label: t('notifications.event.DOWN') },
   { value: 'UP', label: t('notifications.event.UP') },
   { value: 'TEST', label: t('notifications.event.TEST') },
+  { value: 'AGENT_DOWN', label: t('notifications.event.AGENT_DOWN') },
+  { value: 'AGENT_UP', label: t('notifications.event.AGENT_UP') },
 ])
 const statusOptions = computed(() => [
   { value: 'success', label: t('notifications.status.success') },
@@ -97,10 +99,10 @@ onMounted(async () => {
   } catch { /* 下拉保持为空 */ }
 })
 
-// 事件标签颜色:DOWN 红、UP 绿、TEST 灰。
+// 事件标签颜色:DOWN/AGENT_DOWN 红、UP/AGENT_UP 绿、TEST 灰。
 function eventTagType(event: string): 'danger' | 'success' | 'info' {
-  if (event === 'DOWN') return 'danger'
-  if (event === 'UP') return 'success'
+  if (event === 'DOWN' || event === 'AGENT_DOWN') return 'danger'
+  if (event === 'UP' || event === 'AGENT_UP') return 'success'
   return 'info'
 }
 

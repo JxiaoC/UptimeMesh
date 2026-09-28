@@ -12,6 +12,8 @@ interface Channel {
   bodyTemplate: string
   /** 启用状态:false = 禁用,不接收自动告警/恢复通知(测试发送不受限)。 */
   enabled: boolean
+  /** 节点通知:勾选后接收节点掉线/恢复上线推送(AGENT_DOWN/AGENT_UP)。 */
+  agentNotify: boolean
   createdAt: string
 }
 
@@ -44,7 +46,7 @@ const loading = ref(false)
 const toggling = ref(new Set<string>())
 const dialog = reactive({
   visible: false, editing: null as Channel | null,
-  name: '', url: '', bodyTemplate: '', enabled: true,
+  name: '', url: '', bodyTemplate: '', enabled: true, agentNotify: true,
 })
 
 // 括号 token 在脚本里拼好:模板中直接写 {{ 会破坏 Vue 解析。
@@ -78,13 +80,13 @@ onMounted(load)
 
 function openCreate() {
   Object.assign(dialog, {
-    visible: true, editing: null, name: '', url: '', bodyTemplate: '', enabled: true,
+    visible: true, editing: null, name: '', url: '', bodyTemplate: '', enabled: true, agentNotify: true,
   })
 }
 function openEdit(c: Channel) {
   Object.assign(dialog, {
     visible: true, editing: c, name: c.name, url: c.url, bodyTemplate: c.bodyTemplate || '',
-    enabled: c.enabled,
+    enabled: c.enabled, agentNotify: c.agentNotify,
   })
 }
 
@@ -119,6 +121,7 @@ async function save() {
     url: dialog.url.trim(),
     bodyTemplate: dialog.bodyTemplate.trim(),
     enabled: dialog.enabled,
+    agentNotify: dialog.agentNotify,
   }
   try {
     if (dialog.editing) await http.put(`/channels/${dialog.editing.id}`, body)
@@ -257,6 +260,10 @@ async function applyToAll(c: Channel) {
         <el-form-item :label="t('channels.enabled')">
           <el-switch v-model="dialog.enabled" />
           <span class="enabled-hint">{{ t('channels.enabledHint') }}</span>
+        </el-form-item>
+        <el-form-item :label="t('channels.agentNotify')">
+          <el-switch v-model="dialog.agentNotify" />
+          <span class="enabled-hint">{{ t('channels.agentNotifyHint') }}</span>
         </el-form-item>
         <el-form-item label="Webhook URL" required>
           <el-input

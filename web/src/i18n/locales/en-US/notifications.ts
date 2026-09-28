@@ -28,6 +28,8 @@ const enNotifications: typeof notifications = {
       DOWN: 'Alert Triggered',
       UP: 'Recovery',
       TEST: 'Test Message',
+      AGENT_DOWN: 'Agent Offline',
+      AGENT_UP: 'Agent Back Online',
     },
     attemptsN: '{n} attempts in total',
     filterMonitor: 'Filter by monitor',

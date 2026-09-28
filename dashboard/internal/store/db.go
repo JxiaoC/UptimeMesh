@@ -234,6 +234,11 @@ var columnMigrations = []columnMigration{
 	// 通知渠道的启用状态(见 .scratch/channel-enabled/spec.md):存量渠道补出来是 1 = 启用,
 	// 语义是"升级不改变现有告警行为",要停用得由用户显式关掉。
 	{table: TableChannels, column: "enabled", ddl: "enabled INTEGER NOT NULL DEFAULT 1"},
+	// 节点掉线推送(见 .scratch/agent-offline-notify/spec.md):节点开关、渠道勾选
+	// 存量都补成 1(默认开启,升级即获得节点掉线推送),延迟确认默认 60 秒。
+	{table: TableAgents, column: "offline_notify", ddl: "offline_notify INTEGER NOT NULL DEFAULT 1"},
+	{table: TableChannels, column: "agent_notify", ddl: "agent_notify INTEGER NOT NULL DEFAULT 1"},
+	{table: TableSettings, column: "agent_offline_notify_seconds", ddl: "agent_offline_notify_seconds INTEGER NOT NULL DEFAULT 60"},
 }
 
 // postMigrationUpdates 是依赖"新增列"的幂等数据回填,必须在补列之后、

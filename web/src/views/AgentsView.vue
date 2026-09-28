@@ -27,6 +27,8 @@ interface Agent {
   // 节点自报的本机 IPv4 / IPv6 可用性;null = 老版本 Agent 未上报(未知,不等于不支持)
   ipv4Available: boolean | null
   ipv6Available: boolean | null
+  // 掉线推送开关:掉线(延迟确认后)与恢复上线都向「节点通知渠道」发推送
+  offlineNotify: boolean
 }
 
 const { t } = useI18n()
@@ -150,6 +152,27 @@ async function remove(agent: Agent) {
   await http.delete(`/agents/${agent.id}`)
   ElMessage.success(t('common.deleted'))
   await load()
+}
+
+// ---- 掉线推送开关(仅已批准节点):切到哪边就按哪边发推送 ----
+// 刻意**先乐观改本地状态再发请求**(与 ChannelsView 的启用开关同款):
+// el-switch 的勾选态完全由 model-value 决定,等接口回来再改状态会让开关"拨过去
+// 又弹回来再弹过去";失败时拨回真实状态即可(错误提示由 http 拦截器兜底)。
+const togglingNotify = ref<Set<string>>(new Set())
+
+async function toggleOfflineNotify(agent: Agent, value: boolean | string | number) {
+  const on = value === true
+  const before = agent.offlineNotify
+  agent.offlineNotify = on
+  togglingNotify.value.add(agent.id)
+  try {
+    await http.put(`/agents/${agent.id}/offline-notify`, { offlineNotify: on })
+    ElMessage.success(t(on ? 'agents.offlineNotifyOn' : 'agents.offlineNotifyOff', { name: agent.name }))
+  } catch {
+    agent.offlineNotify = before // 拦截器已提示原因;把开关拨回真实状态
+  } finally {
+    togglingNotify.value.delete(agent.id)
+  }
 }
 
 // ---- 一键升级:让节点升到仪表盘当前分发的版本 ----
@@ -372,6 +395,23 @@ async function copyInstall() {
           </span>
         </template>
       </el-table-column>
+      <!-- 掉线推送:节点掉线(延迟确认后)与恢复上线都向「节点通知渠道」发 webhook。
+           仅已批准节点有语义(pending/revoked 的连接断开是正常流转),其余显示「—」。 -->
+      <el-table-column width="110">
+        <template #header>
+          <el-tooltip :content="t('agents.offlineNotifyTip')" placement="top">
+            <span>{{ t('agents.columnOfflineNotify') }}</span>
+          </el-tooltip>
+        </template>
+        <template #default="{ row }">
+          <el-switch v-if="row.status === 'approved'" size="small"
+            :model-value="row.offlineNotify"
+            :loading="togglingNotify.has(row.id)"
+            @change="(v: boolean | string | number) => toggleOfflineNotify(row, v)"
+          />
+          <span v-else class="offline-notify-na">—</span>
+        </template>
+      </el-table-column>
       <el-table-column :label="t('agents.columnVersion')" width="170">
         <template #default="{ row }">
           <span>{{ row.version || '—' }}</span>
@@ -540,6 +580,10 @@ async function copyInstall() {
   display: inline-flex;
   align-items: center;
   gap: 6px;
+}
+/* 未批准行的「—」占位:次要色,与可用开关在视觉上区分开。 */
+.offline-notify-na {
+  color: var(--el-text-color-secondary);
 }
 .online-dot {
   width: 8px;

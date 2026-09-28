@@ -27,7 +27,7 @@ import (
 // Title/Content 是按「设置 → 通知模板」渲染后的标题与正文(带占位符变量);
 // 其余结构化字段保留原样,便于用户侧自行取用。
 type Payload struct {
-	Event       string  `json:"event"` // DOWN | UP | TEST
+	Event       string  `json:"event"` // DOWN | UP | TEST | AGENT_DOWN | AGENT_UP
 	Title       string  `json:"title"`
 	Content     string  `json:"content"`
 	MonitorID   string  `json:"monitorId"`
@@ -45,11 +45,18 @@ type Payload struct {
 	ErrorCount int `json:"errorCount"`
 	// DurationSec 是本次报警的持续秒数:仅恢复(UP)事件有值(见 alert.Event.DurationSec);
 	// 模板变量 {{duration}} 是它的可读文本形式。0 = 无可配对的报错记录。
+	// 节点事件复用它:AGENT_UP 带本次离线秒数(掉线通知发出到重连),其余为 0。
 	DurationSec int64 `json:"durationSec,omitempty"`
 	// Nodes 是触发事件那一轮的节点明细(每个被指派节点一条):接收端不必再回查
 	// Dashboard 就知道"是谁挂了、谁没回结果"。
-	Nodes     []NodeStatus `json:"nodes,omitempty"`
-	Timestamp string       `json:"timestamp"`
+	Nodes []NodeStatus `json:"nodes,omitempty"`
+	// AgentID / AgentName / AgentPlatform / AgentIP 仅节点事件(AGENT_DOWN/AGENT_UP)有值,
+	// 其余事件为空 —— 接收端按 event 区分,不必回查 Dashboard 就知道是哪台机器。
+	AgentID      string `json:"agentId,omitempty"`
+	AgentName    string `json:"agentName,omitempty"`
+	AgentPlatform string `json:"agentPlatform,omitempty"`
+	AgentIP      string `json:"agentIP,omitempty"`
+	Timestamp    string `json:"timestamp"`
 }
 
 // 节点明细的状态取值(进模板变量与结构化载荷,前端据此上色)。
@@ -152,6 +159,55 @@ func enabledChannels(channels []*store.Channel) []*store.Channel {
 	out := make([]*store.Channel, 0, len(channels))
 	for _, ch := range channels {
 		if ch.Enabled {
+			out = append(out, ch)
+		}
+	}
+	return out
+}
+
+// EmitAgentEvent 异步向勾选了「节点通知」的启用渠道投递节点事件
+// (AGENT_DOWN/AGENT_UP,见 internal/agentnotify)。
+// 与监控告警的渠道选择互相独立:监控按 Monitor.ChannelIds 勾选,节点按渠道的
+// AgentNotify 勾选;两边都各自叠加渠道的 Enabled 开关。
+// durationSec 仅恢复(AGENT_UP)事件有值:本次离线持续秒数(掉线通知发出到重连),
+// 渲染成 {{duration}} 的可读文本。
+func (n *Notifier) EmitAgentEvent(ctx context.Context, ag *store.Agent, event string, durationSec int64) {
+	ts := time.Now().Format(time.RFC3339)
+	vars := notifytmpl.Vars{
+		Event: event, AgentID: ag.ID.Hex(), AgentName: ag.Name,
+		AgentPlatform: ag.OS + "/" + ag.Arch, AgentIP: ag.SourceIP,
+		Duration:  durationText(durationSec),
+		Timestamp: ts,
+	}
+	rendered := notifytmpl.Render(n.template(ctx, event, ""), vars)
+	p := Payload{
+		Event: event, Title: rendered.Title, Content: rendered.Content,
+		DurationSec: durationSec,
+		AgentID:     ag.ID.Hex(), AgentName: ag.Name,
+		AgentPlatform: ag.OS + "/" + ag.Arch, AgentIP: ag.SourceIP,
+		Timestamp: ts,
+	}
+	channels, err := n.st.ListChannels(ctx)
+	if err != nil {
+		g.Log().Warningf(ctx, "读取通知渠道失败,节点 %s 的 %s 通知未投递: %v", ag.Name, event, err)
+		return
+	}
+	active := enabledChannels(agentChannels(channels))
+	// 与 EmitMonitorEvent 同一口径:勾选的渠道一个都不可用时留日志,别让"怎么没发出来"只能翻库。
+	if len(active) == 0 {
+		if total := len(agentChannels(channels)); total > 0 {
+			g.Log().Warningf(ctx, "有 %d 个渠道勾选了节点通知,但没有一个可用(已禁用),本次 %s 通知未投递", total, event)
+		}
+		return
+	}
+	n.dispatch(ctx, active, p)
+}
+
+// agentChannels 滤出勾选了「节点通知」的渠道(Enabled 由 enabledChannels 再滤)。
+func agentChannels(channels []*store.Channel) []*store.Channel {
+	out := make([]*store.Channel, 0, len(channels))
+	for _, ch := range channels {
+		if ch.AgentNotify {
 			out = append(out, ch)
 		}
 	}

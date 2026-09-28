@@ -38,6 +38,10 @@ type channelReq struct {
 	// Enabled 用指针区分「请求里没带这一项」与「显式传了 false」:
 	// 新建时缺省 = 启用,编辑时缺省 = 保持原状态(不是"顺手禁用")。
 	Enabled *bool `json:"enabled"`
+	// AgentNotify 节点通知勾选:该渠道是否接收节点掉线/恢复上线推送。
+	// 与 Enabled 同款指针语义:新建缺省 = 勾选(节点开关默认开,开箱即用),
+	// 编辑缺省 = 保持原状态。
+	AgentNotify *bool `json:"agentNotify"`
 }
 
 func (req *channelReq) validate() error {
@@ -72,6 +76,7 @@ func channelView(c *store.Channel) g.Map {
 		"id": c.ID.Hex(), "name": c.Name, "url": c.URL,
 		"bodyTemplate": c.BodyTemplate,
 		"enabled":      c.Enabled,
+		"agentNotify":  c.AgentNotify,
 		"createdAt":    fmtTime(c.CreatedAt),
 	}
 }
@@ -117,7 +122,9 @@ func (a *API) createChannel(r *ghttp.Request) {
 		return
 	}
 	c := &store.Channel{Name: req.Name, URL: req.URL, BodyTemplate: req.BodyTemplate,
-		Enabled: req.Enabled == nil || *req.Enabled}
+		Enabled: req.Enabled == nil || *req.Enabled,
+		// 节点通知缺省勾选:与节点侧开关默认开配套,配好渠道即收节点掉线推送。
+		AgentNotify: req.AgentNotify == nil || *req.AgentNotify}
 	if err := a.Store.InsertChannel(r.Context(), c); err != nil {
 		r.Response.WriteJsonExit(g.Map{"code": 500, "message": "创建失败"})
 		return
@@ -147,6 +154,9 @@ func (a *API) updateChannel(r *ghttp.Request) {
 	c.Name, c.URL, c.BodyTemplate = req.Name, req.URL, req.BodyTemplate
 	if req.Enabled != nil {
 		c.Enabled = *req.Enabled
+	}
+	if req.AgentNotify != nil {
+		c.AgentNotify = *req.AgentNotify
 	}
 	if err := a.Store.UpdateChannel(r.Context(), c); err != nil {
 		r.Response.WriteJsonExit(g.Map{"code": 500, "message": "更新失败"})

@@ -11,17 +11,21 @@ import (
 //
 // Enabled 为 false 表示渠道已禁用:自动告警/恢复通知不再投递给它,但它仍留在
 // 监控的勾选里(启用后立即恢复投递,不必重新勾选)。手动「测试发送」不受此限制。
+//
+// AgentNotify 控制节点级推送(AGENT_DOWN/AGENT_UP,见 internal/agentnotify):
+// 与 Enabled 独立勾选,两个开关叠加生效 —— 禁用渠道照样一条不发。
 type Channel struct {
 	ID           ID        `json:"id"`
 	Name         string    `json:"name"`
 	URL          string    `json:"url"`
 	BodyTemplate string    `json:"bodyTemplate,omitempty"`
 	Enabled      bool      `json:"enabled"`
+	AgentNotify  bool      `json:"agentNotify"`
 	CreatedAt    time.Time `json:"createdAt"`
 	UpdatedAt    time.Time `json:"updatedAt"`
 }
 
-const channelCols = `id, name, url, body_template, enabled, created_at, updated_at`
+const channelCols = `id, name, url, body_template, enabled, agent_notify, created_at, updated_at`
 
 func scanChannel(row interface{ Scan(...any) error }) (*Channel, error) {
 	var (
@@ -29,7 +33,7 @@ func scanChannel(row interface{ Scan(...any) error }) (*Channel, error) {
 		bodyTemplate       sql.NullString
 		createdAt, updated int64
 	)
-	if err := row.Scan(&c.ID, &c.Name, &c.URL, &bodyTemplate, &c.Enabled, &createdAt, &updated); err != nil {
+	if err := row.Scan(&c.ID, &c.Name, &c.URL, &bodyTemplate, &c.Enabled, &c.AgentNotify, &createdAt, &updated); err != nil {
 		return nil, normalizeErr(err)
 	}
 	c.BodyTemplate = trimNull(bodyTemplate)
@@ -44,8 +48,8 @@ func (s *Store) InsertChannel(ctx context.Context, c *Channel) error {
 	}
 	c.CreatedAt, c.UpdatedAt = now, now
 	_, err := s.db.ExecContext(ctx,
-		`INSERT INTO channels (`+channelCols+`) VALUES (?,?,?,?,?,?,?)`,
-		c.ID, c.Name, c.URL, nullStr(c.BodyTemplate), c.Enabled,
+		`INSERT INTO channels (`+channelCols+`) VALUES (?,?,?,?,?,?,?,?)`,
+		c.ID, c.Name, c.URL, nullStr(c.BodyTemplate), c.Enabled, c.AgentNotify,
 		unixSec(c.CreatedAt), unixSec(c.UpdatedAt))
 	return normalizeErr(err)
 }
@@ -99,8 +103,8 @@ func (s *Store) queryChannels(ctx context.Context, query string, args ...any) ([
 func (s *Store) UpdateChannel(ctx context.Context, c *Channel) error {
 	c.UpdatedAt = time.Now()
 	res, err := s.db.ExecContext(ctx, `UPDATE channels SET name=?, url=?, body_template=?,
-		enabled=?, updated_at=? WHERE id=?`,
-		c.Name, c.URL, nullStr(c.BodyTemplate), c.Enabled, unixSec(c.UpdatedAt), c.ID)
+		enabled=?, agent_notify=?, updated_at=? WHERE id=?`,
+		c.Name, c.URL, nullStr(c.BodyTemplate), c.Enabled, c.AgentNotify, unixSec(c.UpdatedAt), c.ID)
 	if err != nil {
 		return normalizeErr(err)
 	}

@@ -22,6 +22,9 @@ CREATE TABLE IF NOT EXISTS settings (
   result_retention_days INTEGER NOT NULL DEFAULT 0,
   -- 监控列表页「最近状态」一列的格数;0 = 未配置,读出时回落默认值(store.DefaultStatusStripRounds)。
   status_strip_rounds   INTEGER NOT NULL DEFAULT 0,
+  -- 节点掉线推送的延迟确认秒数:掉线后等待这么久仍未上线才发 AGENT_DOWN(0 = 立即)。
+  -- 上限 3600,由 API 层校验;默认 60 秒可过滤掉秒级网络闪断的误报。
+  agent_offline_notify_seconds INTEGER NOT NULL DEFAULT 60,
   notify_templates      TEXT,
   created_at            INTEGER NOT NULL DEFAULT 0,
   updated_at            INTEGER NOT NULL DEFAULT 0
@@ -35,6 +38,9 @@ CREATE TABLE IF NOT EXISTS channels (
   -- 启用状态:0 = 禁用,该渠道不接收自动告警/恢复通知(手动「测试发送」不受限)。
   -- 存量库由 db.go 的补列迁移补成 1(默认启用),不会把已配置好的渠道静默关掉。
   enabled       INTEGER NOT NULL DEFAULT 1,
+  -- 节点通知:1 = 该渠道接收节点掉线/恢复上线推送(AGENT_DOWN/AGENT_UP)。
+  -- 与 enabled 独立:两个开关叠加生效(禁用渠道照样一条不发)。
+  agent_notify  INTEGER NOT NULL DEFAULT 1,
   created_at    INTEGER NOT NULL DEFAULT 0,
   updated_at    INTEGER NOT NULL DEFAULT 0
 );
@@ -63,7 +69,10 @@ CREATE TABLE IF NOT EXISTS agents (
   region_ip_cache TEXT NOT NULL DEFAULT '',
   last_seen       INTEGER NOT NULL DEFAULT 0,
   created_at      INTEGER NOT NULL DEFAULT 0,
-  updated_at      INTEGER NOT NULL DEFAULT 0
+  updated_at      INTEGER NOT NULL DEFAULT 0,
+  -- 掉线推送开关:1 = 该节点掉线(延迟确认后)与恢复上线都向「节点通知渠道」发推送。
+  -- 存量库由 db.go 的补列迁移补成 1(默认开启),升级不改变现有告警行为。
+  offline_notify  INTEGER NOT NULL DEFAULT 1
 );
 
 CREATE INDEX IF NOT EXISTS idx_agents_status_created ON agents (status, created_at DESC);
