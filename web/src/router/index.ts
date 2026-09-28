@@ -8,6 +8,7 @@ import AgentsView from '../views/AgentsView.vue'
 import MonitorsView from '../views/MonitorsView.vue'
 import MonitorDetailView from '../views/MonitorDetailView.vue'
 import ChannelsView from '../views/ChannelsView.vue'
+import NotificationsView from '../views/NotificationsView.vue'
 
 const routes = [
   { path: '/login', name: 'login', component: LoginView },
@@ -21,6 +22,7 @@ const routes = [
       { path: 'monitors/:id', name: 'monitorDetail', component: MonitorDetailView },
       { path: 'agents', name: 'agents', component: AgentsView },
       { path: 'channels', name: 'channels', component: ChannelsView },
+      { path: 'notifications', name: 'notifications', component: NotificationsView },
       { path: 'settings', name: 'settings', component: SettingsView },
     ],
   },

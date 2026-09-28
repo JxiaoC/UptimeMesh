@@ -338,7 +338,10 @@ func (n *Notifier) EmitTest(ctx context.Context, ch *store.Channel) error {
 		Event: notifytmpl.EventTest, Title: rendered.Title, Content: rendered.Content,
 		MonitorName: "(测试消息)", Timestamp: ts, ErrorCount: errorCount,
 	}
-	return n.postWithRetry(ctx, ch, p)
+	attempts, err := n.postWithRetry(ctx, ch, p)
+	// 测试发送的结论同样留痕:记录页看得到每一次 TEST(含手点失败的那次)。
+	n.recordDelivery(ctx, ch, p, attempts, err)
+	return err
 }
 
 // template 读取并解析指定事件的消息模板;读库失败时回落默认模板,
@@ -357,38 +360,63 @@ func (n *Notifier) template(ctx context.Context, event, monitorType string) noti
 	return resolved[notifytmpl.EventDown]
 }
 
-// dispatch 每渠道一个 goroutine,互不阻塞。
+// dispatch 每渠道一个 goroutine,互不阻塞。投递完成(无论成败)落一条通知记录,
+// 供「通知记录」页面回查 —— 告警到底发没发出去、失败在哪,不再只能翻日志。
 func (n *Notifier) dispatch(ctx context.Context, channels []*store.Channel, p Payload) {
 	for _, ch := range channels {
 		n.wg.Add(1)
 		go func(ch *store.Channel) {
 			defer n.wg.Done()
-			if err := n.postWithRetry(ctx, ch, p); err != nil {
+			attempts, err := n.postWithRetry(ctx, ch, p)
+			n.recordDelivery(ctx, ch, p, attempts, err)
+			if err != nil {
 				g.Log().Errorf(ctx, "webhook 渠道 %s(%s) 最终失败: %v", ch.Name, ch.URL, err)
 			}
 		}(ch)
 	}
 }
 
-func (n *Notifier) postWithRetry(ctx context.Context, ch *store.Channel, p Payload) error {
+// recordDelivery 把一次投递的结论写入 notification_logs。落库失败只记日志:
+// 通知已经发出去了,留痕失败不该反过来惊动用户。
+func (n *Notifier) recordDelivery(ctx context.Context, ch *store.Channel, p Payload, attempts int, err error) {
+	status := store.NotifyStatusSuccess
+	errText := ""
+	if err != nil {
+		status = store.NotifyStatusFailed
+		errText = err.Error()
+	}
+	nl := &store.NotificationLog{
+		ChannelID: ch.ID, ChannelName: ch.Name,
+		MonitorID: store.ID(p.MonitorID), MonitorName: p.MonitorName,
+		Event: p.Event, Status: status, Attempts: attempts,
+		Title: p.Title, Content: p.Content, Error: errText,
+	}
+	if e := n.st.InsertNotificationLog(ctx, nl); e != nil {
+		g.Log().Warningf(ctx, "通知投递记录落库失败(渠道 %s): %v", ch.Name, e)
+	}
+}
+
+// postWithRetry 带重试投递;返回实际尝试次数(成功与失败口径一致,见
+// NotificationLog.Attempts)。测试发送(RetryDelays=nil)只试一次。
+func (n *Notifier) postWithRetry(ctx context.Context, ch *store.Channel, p Payload) (int, error) {
 	body, err := channelBody(ch, p)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	var lastErr error
 	for attempt := 0; ; attempt++ {
 		lastErr = n.postOnce(ctx, ch.URL, body)
 		if lastErr == nil {
-			return nil
+			return attempt + 1, nil
 		}
 		if attempt >= len(n.RetryDelays) {
-			return fmt.Errorf("尝试 %d 次均失败,最后一次: %w", attempt+1, lastErr)
+			return attempt + 1, fmt.Errorf("尝试 %d 次均失败,最后一次: %w", attempt+1, lastErr)
 		}
 		g.Log().Debugf(ctx, "webhook %s 第 %d 次失败(%v),%s 后重试",
 			ch.URL, attempt+1, lastErr, n.RetryDelays[attempt])
 		select {
 		case <-ctx.Done():
-			return ctx.Err()
+			return attempt + 1, ctx.Err()
 		case <-time.After(n.RetryDelays[attempt]):
 		}
 	}

@@ -60,6 +60,7 @@ export default {
     monitors: '监控',
     agents: '节点',
     channels: '通知渠道',
+    notifications: '通知记录',
     settings: '设置',
   },
   login: {

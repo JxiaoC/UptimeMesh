@@ -117,6 +117,7 @@ const menu = computed(() => [
   { index: '/monitors', label: t('nav.monitors') },
   { index: '/agents', label: t('nav.agents') },
   { index: '/channels', label: t('nav.channels') },
+  { index: '/notifications', label: t('nav.notifications') },
   { index: '/settings', label: t('nav.settings') },
 ])
 </script>

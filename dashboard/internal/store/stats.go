@@ -333,6 +333,7 @@ func (s *Store) EstimateDailyGrowth(ctx context.Context) (*DailyGrowth, error) {
 var statTables = []string{
 	TableAgents, TableMonitors, TableRounds, TableResults, TableHourlyStats,
 	TableChannels, TableSettings, TableUsers, TableMonitorStates, TableStateChanges,
+	TableNotificationLogs,
 }
 
 // dbStatsCacheTTL 占用统计的缓存时长。够短:后台重算完成后最多 5 秒即读到新值

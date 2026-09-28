@@ -22,6 +22,8 @@ const (
 	TableMonitorStates = "monitor_states"
 	// TableStateChanges 是告警状态变动记录(见 state_changes.go)。
 	TableStateChanges = "monitor_state_changes"
+	// TableNotificationLogs 是通知投递记录(见 notification_logs.go),永久保留。
+	TableNotificationLogs = "notification_logs"
 )
 
 // Agent 是节点接入记录。首连用接入密钥进来时为 pending,批准后签发凭据。

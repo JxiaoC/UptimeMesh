@@ -65,6 +65,7 @@ func (a *API) Register(s *ghttp.Server) {
 			a.registerMonitorRoutes(prot)
 			a.registerRoundRoutes(prot)
 			a.registerChannelRoutes(prot)
+			a.registerNotificationRoutes(prot)
 			a.registerStatsRoutes(prot)
 			a.registerSettingsRoutes(prot)
 		})

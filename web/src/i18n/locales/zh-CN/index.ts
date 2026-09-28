@@ -5,6 +5,7 @@ import agents from './agents'
 import core from './core'
 import detail from './detail'
 import monitors from './monitors'
+import notifications from './notifications'
 import overview from './overview'
 import settings from './settings'
 
@@ -14,5 +15,6 @@ export default {
   ...monitors,
   ...detail,
   ...agents,
+  ...notifications,
   ...settings,
 }

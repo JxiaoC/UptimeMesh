@@ -215,3 +215,29 @@ CREATE TABLE IF NOT EXISTS monitor_state_changes (
 
 CREATE INDEX IF NOT EXISTS idx_state_changes_monitor_changed
   ON monitor_state_changes (monitor_id, changed_at DESC);
+
+-- 通知投递记录:每次向渠道投递通知(webhook)都落一行,永久保留 —— 不受
+-- 「原始结果保留(天)」限制(retention.go 只清理结果/轮次/变动记录/小时聚合,
+-- 故意不碰本表)。渠道被删除后记录仍在(channel_name 冗余快照,列表照常显示);
+-- 记录本身无删除入口,量级 = 每次告警/恢复/测试 × 勾选渠道数。
+--   * status:发送结论 —— success(2xx)/ failed(重试耗尽或单次失败);upcoming 不落库。
+--   * attempts:实际尝试次数(含最后一次);title/content 是按「设置 → 通知模板」
+--     渲染后的最终文案(与 webhook 载荷一致)。
+CREATE TABLE IF NOT EXISTS notification_logs (
+  id           TEXT PRIMARY KEY,
+  channel_id   TEXT NOT NULL,
+  channel_name TEXT NOT NULL DEFAULT '',
+  monitor_id   TEXT NOT NULL DEFAULT '',
+  monitor_name TEXT NOT NULL DEFAULT '',
+  event        TEXT NOT NULL,
+  status       TEXT NOT NULL,
+  attempts     INTEGER NOT NULL DEFAULT 1,
+  title        TEXT NOT NULL DEFAULT '',
+  content      TEXT NOT NULL DEFAULT '',
+  error        TEXT NOT NULL DEFAULT '',
+  created_at   INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE INDEX IF NOT EXISTS idx_notification_logs_created ON notification_logs (created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_notification_logs_monitor ON notification_logs (monitor_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_notification_logs_channel ON notification_logs (channel_id, created_at DESC);

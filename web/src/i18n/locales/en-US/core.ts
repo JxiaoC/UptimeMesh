@@ -52,6 +52,7 @@ const core: typeof zhCore = {
     monitors: 'Monitors',
     agents: 'Agents',
     channels: 'Channels',
+    notifications: 'Notifications',
     settings: 'Settings',
   },
   login: {
