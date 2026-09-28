@@ -359,6 +359,7 @@ function stateTag(r: TimelineRow) {
           :agent-name="agentName"
           :agent-region="agentRegion"
           :speed-unit="isDownload ? speedUnit : ''"
+          :inverted="!!monitor?.invertMode"
         />
       </el-col>
       <el-col :xs="24" :lg="12">
@@ -371,6 +372,7 @@ function stateTag(r: TimelineRow) {
           :agent-name="agentName"
           :agent-region="agentRegion"
           :speed-unit="isDownload ? speedUnit : ''"
+          :inverted="!!monitor?.invertMode"
           show-change
           time-field="changedAt"
         />

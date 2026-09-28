@@ -3,6 +3,11 @@
 // 两块面板的状态/成功率/节点明细口径一致,故列定义只有这一份;变动记录表在列首多一列
 // 「变动」(UP→DOWN),否则看不出方向。行为空时给出各自的空文案。
 //
+// 节点明细列一律**单行**(见 .scratch/detail-agents-one-line/spec.md):一个节点一行,
+// 行内 flex + nowrap,放不下的内容省略号截断;整行可点击,弹窗里给出该节点的完整明细
+// (结果/说明/地域/回传时间/延迟/状态码/速度/完整失败原因)。失败原因等长文本
+// (push 监控的静默说明、HTTP 报错串)因此不再把行撑高,也不必横向滚动就能看全。
+//
 // 唯一的列差异是**时间列**(见 timeField):轮次表给该轮的计划时间(调度器建轮/下发
 // 那一刻),变动表给变动时间(该轮定稿、状态机真正翻转那一刻)。两者是两个时刻 ——
 // 相隔"探测超时 + 收集宽限期 + 探活 3s + 一个调度 tick",push 监控还隔着静默判定的
@@ -12,13 +17,14 @@
 // 「变动」列里,恢复(DOWN→UP)那一行的标签右边还会多一张「持续 x 分 y 秒」的小卡:
 // 报警持续了多久是恢复这条记录才有的信息(报错那条给不出 —— 当时还不知道要挂多久),
 // 见 .scratch/alert-duration/spec.md。
+import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { flagClass, regionName } from '../utils/region'
 import { formatSpeed } from '../utils/speed'
 import { formatDuration } from '../utils/duration'
 import type { StateChange, StateTag, TimelineRow } from '../api/types'
 
-defineProps<{
+const props = defineProps<{
   rows: TimelineRow[]
   emptyText: string
   /** 本行的状态标签(与轮次时间线同一口径,由父组件提供,避免两处各写一套) */
@@ -43,6 +49,13 @@ defineProps<{
    * 节点明细里也带上各节点测得的speed。
    */
   speedUnit?: string
+  /**
+   * 监控是否开启反转模式:结果的 ok 已是折算后的判定(后端 EffOK),
+   * error/status 仍是原始观测。反转下两种折算形态要单独说明 ——
+   *   原始成功被记为失败:没有报错文本,弹窗若还说「原因见失败原因」就是空指引;
+   *   原始失败被记为正常:结果「正常」却带着报错,标签改成「原始报错」才不自相矛盾。
+   */
+  inverted?: boolean
 }>()
 
 const { t } = useI18n()
@@ -59,6 +72,124 @@ function durationOf(row: TimelineRow): string {
   if (sc.toState !== 'UP') return ''
   return sc.durationSec ? formatDuration(sc.durationSec) : ''
 }
+
+/**
+ * DetailLine 节点明细的一行:把「已回传结果」与三种「没有样本」收敛成同一结构,
+ * 单行渲染(此前四种各写一段 v-for,折行行为与省略结构要维护四份)。
+ * kind 口径与后端 round 聚合一致(scheduler/round.go):results / missingAlive /
+ * missingDead / missingUndispatched。
+ */
+interface DetailLine {
+  agentId: string
+  kind: 'result' | 'timeout' | 'offline' | 'undispatched'
+  /** kind === 'result' 时:折算反转后的有效判定(与后端 EffOK 同口径) */
+  ok?: boolean
+  late?: boolean
+  latencyMs?: number
+  httpStatus?: number
+  speedKbps?: number
+  /** Agent 的原始报错文本(反转与否都不改写,详见弹窗) */
+  error?: string
+  createdAt?: string
+}
+
+// linesOf 一轮的节点明细行:结果在前(与后端 results 顺序一致),超时/离线/未派发在后。
+function linesOf(row: TimelineRow): DetailLine[] {
+  const out: DetailLine[] = (row.results || []).map((r) => ({
+    agentId: r.agentId, kind: 'result' as const, ok: r.ok, late: r.late,
+    latencyMs: r.latencyMs, httpStatus: r.httpStatus, speedKbps: r.speedKbps,
+    error: r.error, createdAt: r.createdAt,
+  }))
+  for (const id of row.missingAlive || []) out.push({ agentId: id, kind: 'timeout' })
+  for (const id of row.missingDead || []) out.push({ agentId: id, kind: 'offline' })
+  for (const id of row.missingUndispatched || []) out.push({ agentId: id, kind: 'undispatched' })
+  return out
+}
+
+// verdictOf 节点行的判定词:行内只放短词(单行省略),完整解释在弹窗(noteOf)。
+// 渲染期调用,随语言切换。
+function verdictOf(l: DetailLine): string {
+  if (l.kind === 'result') return l.ok ? t('detail.lineOk') : t('detail.lineFail')
+  if (l.kind === 'timeout') return t('detail.lineTimeout')
+  if (l.kind === 'offline') return t('detail.lineOffline')
+  return t('detail.lineUndispatched')
+}
+
+// noteOf 弹窗里的口径说明:三种「没有样本」的成因与是否计入分母,与后端聚合一致
+// (超时=活着没回传,计失败样本;离线/未派发不计分母)。结果行的说明按反转与否分形态:
+// 反转下「失败」可能是原始探测成功被折算(此时没有报错文本),要直接说破,别再
+// 指向一个不存在的「失败原因」行。
+function noteOf(l: DetailLine): string {
+  if (l.kind === 'result') {
+    if (l.ok) {
+      return props.inverted ? t('detail.popupInvertedOkNote') : t('detail.popupOkNote')
+    }
+    return props.inverted && !l.error
+      ? t('detail.popupInvertedFailNote')
+      : t('detail.popupFailNote')
+  }
+  if (l.kind === 'timeout') return t('detail.popupTimeoutNote')
+  if (l.kind === 'offline') return t('detail.popupOfflineNote')
+  return t('detail.popupUndispatchedNote')
+}
+
+function lineTagType(l: DetailLine): 'success' | 'danger' | 'warning' | 'info' {
+  if (l.kind === 'result') return l.ok ? 'success' : 'danger'
+  return l.kind === 'timeout' ? 'warning' : 'info'
+}
+
+// lineSummary 单行里跟在节点标签后面的摘要:成功给「延迟 · 状态码 · 速度」,
+// 失败给报错文本,三种「没有样本」给判定词(离线与未派发同是灰色标签,
+// 行内必须留字面区分,完整解释在弹窗)。渲染期调用,随语言切换。
+function lineSummary(l: DetailLine): string {
+  if (l.kind !== 'result') return verdictOf(l)
+  if (l.ok) {
+    const parts = [`${(l.latencyMs ?? 0).toFixed(1)}ms`]
+    if (l.httpStatus) parts.push(String(l.httpStatus))
+    if (props.speedUnit && l.speedKbps) parts.push(formatSpeed(l.speedKbps, props.speedUnit))
+    return parts.join(' · ')
+  }
+  return l.error || t('common.failed')
+}
+
+// 点击节点行 → 弹窗看该节点的完整内容(单行省略的出口)。
+const popupLine = ref<DetailLine | null>(null)
+const popupVisible = ref(false)
+function openPopup(l: DetailLine) {
+  popupLine.value = l
+  popupVisible.value = true
+}
+
+// popupItems 弹窗的描述项:结果与说明恒有,其余按数据有无给(不凑空行)。
+// 反转下「正常」行带的报错是原始观测(探测其实失败了),label 用「原始报错」。
+// computed 依赖 t() 与 props/父组件回调里的响应式数据,语言与数据变化都会跟着重算。
+const popupItems = computed(() => {
+  const l = popupLine.value
+  if (!l) return []
+  const items: { label: string; value: string }[] = [
+    { label: t('detail.popupResult'), value: verdictOf(l) },
+    { label: t('detail.popupNote'), value: noteOf(l) },
+  ]
+  const region = props.agentRegion(l.agentId)
+  if (region) items.push({ label: t('detail.popupRegion'), value: regionName(region) })
+  if (l.kind === 'result') {
+    if (l.createdAt) items.push({ label: t('detail.popupReportedAt'), value: l.createdAt })
+    if ((l.latencyMs ?? 0) > 0) {
+      items.push({ label: t('detail.popupLatency'), value: `${(l.latencyMs ?? 0).toFixed(1)} ms` })
+    }
+    if (l.httpStatus) items.push({ label: t('detail.popupHttpStatus'), value: String(l.httpStatus) })
+    if (props.speedUnit && l.speedKbps) {
+      items.push({ label: t('detail.popupSpeed'), value: formatSpeed(l.speedKbps, props.speedUnit) })
+    }
+    if (l.error) {
+      items.push({
+        label: t(props.inverted ? 'detail.popupRawError' : 'detail.popupError'),
+        value: l.error,
+      })
+    }
+  }
+  return items
+})
 </script>
 
 <template>
@@ -122,37 +253,51 @@ function durationOf(row: TimelineRow): string {
     </el-table-column>
     <el-table-column :label="t('detail.columnAgents')" min-width="200">
       <template #default="{ row }">
-        <div v-for="r in row.results" :key="r.agentId" style="line-height:20px">
-          <el-tooltip v-if="agentRegion(r.agentId)" :content="regionName(agentRegion(r.agentId))" placement="top">
-            <el-tag size="small" :type="r.ok ? 'success' : 'danger'" style="margin-right:6px">
-              <span :class="flagClass(agentRegion(r.agentId))" class="agent-flag" />
-              {{ agentName(r.agentId) }}
+        <!-- 一个节点一行、一律单行:节点标签 + 摘要 + 迟到标记横向排布,放不下省略;
+             整行可点击,完整内容(含完整失败原因)在表格后面的弹窗里。 -->
+        <div
+          v-for="l in linesOf(row)"
+          :key="l.agentId"
+          class="agent-line"
+          :class="{ 'agent-line--fail': l.kind === 'result' && !l.ok }"
+          @click="openPopup(l)"
+        >
+          <el-tooltip
+            v-if="agentRegion(l.agentId)"
+            :content="regionName(agentRegion(l.agentId))"
+            placement="top"
+          >
+            <el-tag size="small" :type="lineTagType(l)" class="agent-tag">
+              <span
+                v-if="flagClass(agentRegion(l.agentId))"
+                :class="flagClass(agentRegion(l.agentId))"
+                class="agent-flag"
+              />{{ agentName(l.agentId) }}
             </el-tag>
           </el-tooltip>
-          <el-tag v-else size="small" :type="r.ok ? 'success' : 'danger'" style="margin-right:6px">
-            {{ agentName(r.agentId) }}
-          </el-tag>
-          <span v-if="r.ok">
-            {{ r.latencyMs.toFixed(1) }}ms<span v-if="r.httpStatus"> · {{ r.httpStatus }}</span><span
-              v-if="speedUnit && r.speedKbps"
-            > · {{ formatSpeed(r.speedKbps, speedUnit) }}</span>
-          </span>
-          <span v-else style="color:#f56c6c">{{ r.error || t('common.failed') }}</span>
-          <el-tag v-if="r.late" size="small" type="warning" style="margin-left:6px">{{ t('detail.late') }}</el-tag>
-        </div>
-        <div v-for="id in row.missingAlive" :key="'ma'+id" style="line-height:20px;color:#e6a23c">
-          <span v-if="flagClass(agentRegion(id))" :class="flagClass(agentRegion(id))" class="agent-flag" />{{ t('detail.missingAlive', { agent: agentName(id) }) }}
-        </div>
-        <div v-for="id in row.missingDead" :key="'md'+id" style="line-height:20px;color:#909399">
-          <span v-if="flagClass(agentRegion(id))" :class="flagClass(agentRegion(id))" class="agent-flag" />{{ t('detail.missingDead', { agent: agentName(id) }) }}
-        </div>
-        <!-- 任务没交到手上(与离线同"不计分母",但成因在派发侧:重启后首轮那批) -->
-        <div v-for="id in row.missingUndispatched" :key="'mu'+id" style="line-height:20px;color:#909399">
-          <span v-if="flagClass(agentRegion(id))" :class="flagClass(agentRegion(id))" class="agent-flag" />{{ t('detail.missingUndispatched', { agent: agentName(id) }) }}
+          <el-tag v-else size="small" :type="lineTagType(l)" class="agent-tag">{{ agentName(l.agentId) }}</el-tag>
+          <span class="agent-sum">{{ lineSummary(l) }}</span>
+          <el-tag v-if="l.late" size="small" type="warning" class="late-tag">{{ t('detail.late') }}</el-tag>
         </div>
       </template>
     </el-table-column>
   </el-table>
+  <!-- 节点行详情弹窗:单行省略后「点击看全」的出口。append-to-body:这张表常嵌在
+       详情弹窗(MonitorDetailDialog)里,不 teleport 会被父层定位/层叠裁剪。 -->
+  <el-dialog
+    v-model="popupVisible"
+    :title="t('detail.popupTitle', { agent: popupLine ? agentName(popupLine.agentId) : '' })"
+    width="560px"
+    append-to-body
+  >
+    <div class="line-popup">
+      <el-descriptions v-if="popupLine" :column="1" border size="small">
+        <el-descriptions-item v-for="it in popupItems" :key="it.label" :label="it.label">
+          {{ it.value }}
+        </el-descriptions-item>
+      </el-descriptions>
+    </div>
+  </el-dialog>
 </template>
 
 <style scoped>
@@ -171,4 +316,36 @@ function durationOf(row: TimelineRow): string {
 }
 /* 时长卡与方向标签同色系但更淡:它是补充信息,不该抢「恢复」这个结论的注意力。 */
 .duration-tag { font-variant-numeric: tabular-nums; }
+
+/* 节点明细:一个节点一行、一律单行。标签不参与收缩(flex:none),超长节点名的
+   省略号打在标签内部 —— el-tag 是 inline-flex,只靠外层 text-overflow 会切掉半截字
+   (渠道页同款处理);摘要占满剩余宽度并省略。整行可点,悬停摘要变主色示意。 */
+.agent-line {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  line-height: 20px;
+  cursor: pointer;
+}
+.agent-tag { flex: none; max-width: 100%; }
+.agent-line .agent-tag :deep(.el-tag__content) {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.agent-sum {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-variant-numeric: tabular-nums;
+}
+.agent-line--fail .agent-sum { color: #f56c6c; }
+.agent-line:hover .agent-sum { color: var(--el-color-primary); }
+.late-tag { flex: none; }
+/* 弹窗正文:完整内容允许折行,无空格的长报错串也能断行。 */
+.line-popup :deep(.el-descriptions__cell) { overflow-wrap: anywhere; }
 </style>

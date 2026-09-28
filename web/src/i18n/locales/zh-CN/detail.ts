@@ -58,11 +58,35 @@ export default {
     columnAgents: '节点明细',
     noValidSamples: '无有效样本',
     late: '迟到',
-    missingAlive: '{agent}: 超时(Agent在线)',
-    missingDead: '{agent}: 离线缺样(不计分母)',
-    // 任务从未交到该节点手上(建轮与重连补发时它都不在线):与离线同"不计分母",
-    // 但要与「节点测不出目标」区分开 —— 这一格没有样本是派发侧的问题。
-    missingUndispatched: '{agent}: 未派发任务(不计分母)',
+    // 节点明细的行内判定词(短词,完整解释见 popup*Note)。
+    lineOk: '正常',
+    lineFail: '失败',
+    lineTimeout: '超时(Agent在线)',
+    lineOffline: '离线缺样(不计分母)',
+    lineUndispatched: '未派发任务(不计分母)',
+    // 节点行点击弹出的完整明细。
+    popupTitle: '节点明细 · {agent}',
+    popupResult: '结果',
+    popupNote: '说明',
+    popupRegion: '地域',
+    popupReportedAt: '回传时间',
+    popupLatency: '延迟',
+    popupHttpStatus: '状态码',
+    popupSpeed: '下载速度',
+    popupError: '失败原因',
+    // 「结果 = 正常」的口径:OK 是折算反转后的有效判定(与状态/成功率同一口径),
+    // 下面的状态码与原因仍是 Agent 的原始观测 —— 反转模式下会出现「正常(状态码 502)」。
+    popupOkNote: '本轮探测成功(已按监控口径折算;反转模式下探测成功才算正常)',
+    popupFailNote: '本轮探测失败,判定为低于阈值;有报错时会在下方给出原因',
+    // 反转模式的两种折算形态:结果已折算,报错/状态码仍是原始观测。
+    // 原始成功被记为失败时没有报错文本,说明要直接说破,不能指向不存在的「失败原因」。
+    popupInvertedFailNote: '本轮探测实际成功(状态码见下),因监控开启了反转模式被记为失败;所以没有失败原因',
+    popupInvertedOkNote: '本轮探测实际失败(原始报错见下),因监控开启了反转模式被记为正常',
+    popupRawError: '原始报错',
+    // 三种「没有样本」的成因与计分口径,与后端轮次聚合一致(不计分母=不进成功率)。
+    popupTimeoutNote: '节点在线但这一轮没有回传结果,按失败样本计入成功率分母',
+    popupOfflineNote: '节点离线,这一轮没有它的样本,不计入成功率分母',
+    popupUndispatchedNote: '任务没有派到该节点手上(多为仪表盘重启后的首轮),不计入成功率分母',
   },
   chart: {
     availability: '可用率(%)',
