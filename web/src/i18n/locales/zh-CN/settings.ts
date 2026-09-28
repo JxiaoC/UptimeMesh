@@ -10,6 +10,14 @@ export default {
       database: '数据库占用',
       import: '导入 UptimeKuma',
       config: '配置导入导出',
+      about: '关于',
+    },
+    // 关于:项目标识与开源地址(名称/简介为展示文案,GitHub 地址是常量不进词条)。
+    about: {
+      tagline: '分布式主动监控',
+      desc: 'Dashboard 只负责配置、调度与汇总,检测全部由分布在各处的节点(Agent)执行,同一次探测在多个网络位置分别进行、按轮次聚合判定。',
+      github: 'GitHub 开源地址',
+      licenseNote: '本项目开源,受其开源许可证约束;请在部署与二次分发时保留原作者署名。',
     },
     // 安全:后台登录账号与密码(单管理员)。
     security: {

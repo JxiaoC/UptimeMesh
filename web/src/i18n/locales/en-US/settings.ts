@@ -10,6 +10,14 @@ const settings: typeof zhSettings = {
       database: 'Database usage',
       import: 'Import UptimeKuma',
       config: 'Config import/export',
+      about: 'About',
+    },
+    // 关于:项目标识与开源地址(名称/简介为展示文案,GitHub 地址是常量不进词条)。
+    about: {
+      tagline: 'Distributed Active Monitoring',
+      desc: 'The dashboard only handles configuration, scheduling and aggregation — every check runs on agents (nodes) distributed across networks. The same probe executes at multiple network locations and is judged per aggregated round.',
+      github: 'GitHub repository',
+      licenseNote: 'This project is open source under its license; please keep the original author attribution when deploying or redistributing.',
     },
     security: {
       username: 'Login username',

@@ -2,6 +2,8 @@
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ElMessage } from 'element-plus'
+// Link 图标:关于页 GitHub 外链前的装饰(项目里未全局注册图标,按需引入)。
+import { Link } from '@element-plus/icons-vue'
 import { http, TOKEN_KEY } from '../api/http'
 import { alertBox, confirmBox } from '../utils/confirm'
 
@@ -79,7 +81,10 @@ const savingDays = ref(false)
 const savingStrip = ref(false)
 const rotating = ref(false)
 // 五个分区各占一个标签页,避免设置/安全/模板/占用/导入挤在一屏。
-const activeTab = ref<'general' | 'security' | 'templates' | 'database' | 'import'>('general')
+const activeTab = ref<'general' | 'security' | 'templates' | 'database' | 'import' | 'config' | 'about'>('general')
+
+// 项目开源地址:关于页展示与外链(与仓库 origin、README 一致)。
+const GITHUB_URL = 'https://github.com/JxiaoC/UptimeMesh'
 
 // 通知模板编辑态(与 settings 分开,便于「取消/保存」)。
 const templates = ref<Record<string, NotifyTemplate>>({})
@@ -1509,6 +1514,26 @@ async function resetTemplate() {
           </el-table>
         </template>
       </el-tab-pane>
+      <el-tab-pane :label="t('settings.tabs.about')" name="about">
+        <div class="about-card">
+          <div class="about-brand">
+            <img src="/uptimemesh-mark.svg" alt="UptimeMesh" />
+            <div>
+              <div class="about-name">UptimeMesh</div>
+              <div class="about-tagline">{{ t('settings.about.tagline') }}</div>
+            </div>
+          </div>
+          <p class="about-desc">{{ t('settings.about.desc') }}</p>
+          <div class="about-links">
+            <el-link :href="GITHUB_URL" target="_blank" type="primary">
+              <el-icon style="margin-right:4px"><Link /></el-icon>
+              {{ t('settings.about.github') }}
+            </el-link>
+            <span class="about-url">{{ GITHUB_URL }}</span>
+          </div>
+        </div>
+        <p class="muted-help">{{ t('settings.about.licenseNote') }}</p>
+      </el-tab-pane>
     </el-tabs>
   </div>
 </template>
@@ -1569,4 +1594,23 @@ async function resetTemplate() {
   max-width: 900px;
 }
 .cfg-setting-row { color: #606266; font-size: 13px; line-height: 1.9; }
+/* 关于页:品牌卡片(LOGO + 名称 + 简介)与 GitHub 外链行。 */
+.about-card {
+  background: #f7f8fa;
+  border: 1px solid #ebeef5;
+  border-radius: 6px;
+  padding: 18px 20px;
+  max-width: 560px;
+}
+.about-brand { display: flex; align-items: center; gap: 14px; }
+.about-brand img { width: 44px; height: 44px; display: block; }
+.about-name { font-size: 18px; font-weight: 600; color: #303133; line-height: 1.3; }
+.about-tagline { color: #909399; font-size: 13px; margin-top: 2px; }
+.about-desc { color: #606266; font-size: 13px; line-height: 1.7; margin: 12px 0 0; }
+.about-links { display: flex; align-items: center; gap: 8px; margin-top: 12px; }
+.about-url {
+  color: #909399;
+  font-size: 12px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
 </style>
