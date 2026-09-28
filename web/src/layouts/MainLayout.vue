@@ -131,7 +131,14 @@ const menu = computed(() => [
       </div>
       <!-- index 必须用绝对路径:相对路径在 /monitors/:id 下会被解析成 /monitors/xxx 导致导航失效 -->
       <el-menu :default-active="activeMenu" router>
-        <el-menu-item v-for="m in menu" :key="m.index" :index="m.index">{{ m.label }}</el-menu-item>
+        <el-menu-item v-for="m in menu" :key="m.index" :index="m.index">
+          {{ m.label }}
+          <!-- 报警角标:数量与 favicon 角标同源(alertCount,已启用且 DOWN 的监控数) -->
+          <span
+            v-if="m.index === '/monitors' && alertCount > 0"
+            class="nav-alert-badge"
+          >{{ alertCount > 99 ? '99+' : alertCount }}</span>
+        </el-menu-item>
       </el-menu>
     </el-aside>
     <el-container>
@@ -196,5 +203,22 @@ const menu = computed(() => [
 }
 .el-menu {
   border-right: none;
+}
+.nav-alert-badge {
+  position: absolute;
+  top: 50%;
+  right: 8px;
+  transform: translateY(-50%);
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 100px;
+  background-color: #e53935;
+  color: #fff;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 18px;
+  text-align: center;
+  box-sizing: border-box;
 }
 </style>
