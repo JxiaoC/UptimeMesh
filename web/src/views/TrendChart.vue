@@ -240,18 +240,16 @@ function render() {
     grid: { left: 48, right: isSpeed ? 24 : 48, top: 70, bottom: 30 },
     xAxis: { type: 'category', data: buckets, boundaryGap: data.length < 2 },
     yAxis: [
-      // 可用率固定 0~100;速度没有上限(按数据自适应),轴名带监控配置的单位。
-      //
-      // 速度轴的下界要**带上阈值**:markLine 不参与轴范围计算,若阈值低于所有实测速度,
-      // 线会画到绘图区外面看不见 —— 而那恰恰是"全线达标"最该看到的情形。
+      // 可用率固定 0~100;速度轴固定从 0 开始(速度不会为负,从非零起点读图会夸大波动),
+      // 上限按数据自适应,轴名带监控配置的单位。
       isSpeed
         ? {
           type: 'value',
           name: `${t('chart.axisSpeed')}(${props.speedUnit || 'KB/s'})`,
+          min: 0,
           splitLine: { show: false },
-          // markLine 不参与轴范围计算,所以上下界都要把阈值算进去,否则线会画到绘图区外
-          // (阈值高于所有实测速度=全线破线,低于所有实测速度=全线达标,两种情况都常见)。
-          min: th == null ? undefined : ({ min }: { min: number }) => Math.min(min, th),
+          // markLine 不参与轴范围计算,阈值高于所有实测速度(全线破线)时,
+          // 上界要把阈值算进去,否则阈值线会画到绘图区外看不见。
           max: th == null ? undefined : ({ max }: { max: number }) => Math.max(max, th),
         }
         : { type: 'value', name: t('chart.axisAvailability'), min: 0, max: 100, axisLabel: { formatter: '{value}%' } },
