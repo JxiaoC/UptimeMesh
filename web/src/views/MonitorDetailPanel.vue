@@ -36,7 +36,10 @@ const props = defineProps<{
    */
   layout?: 'page' | 'dialog'
 }>()
-const emit = defineEmits<{ loaded: [monitor: unknown] }>()
+const emit = defineEmits<{
+  loaded: [monitor: unknown]
+  loading: [value: boolean]
+}>()
 
 // 是否弹窗容器:决定正文根节点要不要补 gutter 的 16px(见 props 注释)。
 const inDialog = computed(() => props.layout === 'dialog')
@@ -116,6 +119,7 @@ const rangeShortcuts = computed(() => [
 
 async function load() {
   const mid = props.monitorId
+  if (loading.value) emit('loading', true)
   try {
     monitor.value = await http.get(`/monitors/${mid}`)
     // 轮次时间线与状态变动记录一起拉:两者是详情页底部并排的两块,分开拉会闪。
@@ -133,6 +137,7 @@ async function load() {
     emit('loaded', monitor.value)
   } finally {
     loading.value = false
+    emit('loading', false)
   }
 }
 
