@@ -91,6 +91,9 @@ export default {
     columnEnabled: '启用',
     columnCreatedAt: '创建时间',
     columnActions: '操作',
+    // 列表「节点通知」开关列的列头与消息(弹窗里的 label 复用上面的 agentNotify)。
+    agentNotifyOn: '已开启渠道「{name}」的节点通知',
+    agentNotifyOff: '已关闭渠道「{name}」的节点通知',
     customTemplate: '自定义模板',
     defaultJson: '默认 JSON',
     testSend: '测试发送',

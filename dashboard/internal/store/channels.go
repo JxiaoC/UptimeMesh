@@ -130,6 +130,21 @@ func (s *Store) SetChannelEnabled(ctx context.Context, id ID, enabled bool) erro
 	return nil
 }
 
+// SetChannelAgentNotify 单独切换渠道的「节点通知」勾选(列表页的开关,与
+// SetChannelEnabled 同款:只改这一列,其余配置不动)。
+func (s *Store) SetChannelAgentNotify(ctx context.Context, id ID, on bool) error {
+	res, err := s.db.ExecContext(ctx,
+		`UPDATE channels SET agent_notify=?, updated_at=? WHERE id=?`,
+		on, unixSec(time.Now()), id)
+	if err != nil {
+		return normalizeErr(err)
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
 func (s *Store) DeleteChannel(ctx context.Context, id ID) error {
 	res, err := s.db.ExecContext(ctx, `DELETE FROM channels WHERE id=?`, id)
 	if err != nil {

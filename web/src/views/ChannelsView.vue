@@ -154,6 +154,25 @@ async function toggleEnabled(c: Channel, value: boolean | string | number) {
   }
 }
 
+// toggleAgentNotify 列表行上的「节点通知」开关,与 toggleEnabled 同一套
+// 乐观更新模式;两个开关相互独立,loading 也各用各的集合。
+const togglingAgent = ref(new Set<string>())
+
+async function toggleAgentNotify(c: Channel, value: boolean | string | number) {
+  const on = value === true
+  const before = c.agentNotify
+  c.agentNotify = on
+  togglingAgent.value.add(c.id)
+  try {
+    await http.post(`/channels/${c.id}/agent-notify/${on ? 'enable' : 'disable'}`)
+    ElMessage.success(t(on ? 'channels.agentNotifyOn' : 'channels.agentNotifyOff', { name: c.name }))
+  } catch {
+    c.agentNotify = before // 拦截器已提示原因;把开关拨回真实状态
+  } finally {
+    togglingAgent.value.delete(c.id)
+  }
+}
+
 // rowClassName 禁用行整行压暗:一眼看出哪些渠道现在不投递。
 function rowClassName({ row }: { row: Channel }) {
   return row.enabled ? '' : 'row-disabled'
@@ -224,6 +243,22 @@ async function applyToAll(c: Channel) {
             :model-value="row.enabled"
             :loading="toggling.has(row.id)"
             @change="(v: boolean | string | number) => toggleEnabled(row, v)"
+          />
+        </template>
+      </el-table-column>
+      <!-- 节点通知:与启用开关同款独立开关列。只控制节点掉线/恢复推送,
+           不影响监控告警的投递(两个开关叠加生效)。 -->
+      <el-table-column width="100">
+        <template #header>
+          <el-tooltip :content="t('channels.agentNotifyHint')" placement="top">
+            <span>{{ t('channels.agentNotify') }}</span>
+          </el-tooltip>
+        </template>
+        <template #default="{ row }">
+          <el-switch
+            :model-value="row.agentNotify"
+            :loading="togglingAgent.has(row.id)"
+            @change="(v: boolean | string | number) => toggleAgentNotify(row, v)"
           />
         </template>
       </el-table-column>

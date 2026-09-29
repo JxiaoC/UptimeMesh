@@ -92,6 +92,10 @@ const agents: typeof zhAgents = {
     columnEnabled: 'Enabled',
     columnCreatedAt: 'Created at',
     columnActions: 'Actions',
+    // List column header/message for the agent-notifications switch; the dialog
+    // label reuses `agentNotify` above.
+    agentNotifyOn: 'Agent notifications enabled for channel "{name}"',
+    agentNotifyOff: 'Agent notifications disabled for channel "{name}"',
     customTemplate: 'Custom template',
     defaultJson: 'Default JSON',
     testSend: 'Send test',

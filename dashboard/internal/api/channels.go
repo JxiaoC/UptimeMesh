@@ -27,6 +27,10 @@ func (a *API) registerChannelRoutes(group *ghttp.RouterGroup) {
 	// 启用/禁用开关(渠道页列表行),与监控的 pause/resume 同款写法。
 	group.POST("/channels/{id}/enable", func(r *ghttp.Request) { a.setChannelEnabled(r, true) })
 	group.POST("/channels/{id}/disable", func(r *ghttp.Request) { a.setChannelEnabled(r, false) })
+	// 节点通知开关(渠道页列表行):控制该渠道是否接收节点掉线/恢复推送,
+	// 与启用开关相互独立(见 agentnotify)。
+	group.POST("/channels/{id}/agent-notify/enable", func(r *ghttp.Request) { a.setChannelAgentNotify(r, true) })
+	group.POST("/channels/{id}/agent-notify/disable", func(r *ghttp.Request) { a.setChannelAgentNotify(r, false) })
 	// 把渠道加到所有监控的勾选里(渠道页的「设置为所有监控的渠道」)。
 	group.POST("/channels/{id}/apply-all", a.applyChannelToAllMonitors)
 }
@@ -184,6 +188,33 @@ func (a *API) setChannelEnabled(r *ghttp.Request, enabled bool) {
 	word := "已启用"
 	if !enabled {
 		word = "已禁用"
+	}
+	if c, e := a.Store.FindChannelByID(r.Context(), id); e == nil {
+		r.Response.WriteJsonExit(g.Map{"code": 0, "message": word, "data": channelView(c)})
+		return
+	}
+	r.Response.WriteJsonExit(g.Map{"code": 0, "message": word})
+}
+
+// setChannelAgentNotify 切换渠道的「节点通知」勾选(列表页开关):
+// 只影响节点掉线/恢复推送(AGENT_DOWN/AGENT_UP),不影响监控告警的投递。
+func (a *API) setChannelAgentNotify(r *ghttp.Request, on bool) {
+	id, ok := parseHexID(r, "id")
+	if !ok {
+		return
+	}
+	err := a.Store.SetChannelAgentNotify(r.Context(), id, on)
+	if errors.Is(err, store.ErrNotFound) {
+		r.Response.WriteJsonExit(g.Map{"code": 404, "message": "渠道不存在"})
+		return
+	}
+	if err != nil {
+		r.Response.WriteJsonExit(g.Map{"code": 500, "message": "操作失败"})
+		return
+	}
+	word := "已开启节点通知"
+	if !on {
+		word = "已关闭节点通知"
 	}
 	if c, e := a.Store.FindChannelByID(r.Context(), id); e == nil {
 		r.Response.WriteJsonExit(g.Map{"code": 0, "message": word, "data": channelView(c)})
