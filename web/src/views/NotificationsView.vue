@@ -182,7 +182,7 @@ const hasFilter = computed(
 
     <el-table :data="logs" v-loading="loading" :empty-text="t('notifications.empty')">
       <el-table-column prop="createdAt" :label="t('notifications.columnTime')" width="170" show-overflow-tooltip />
-      <el-table-column :label="t('notifications.columnEvent')" width="90">
+      <el-table-column :label="t('notifications.columnEvent')" width="110">
         <template #default="{ row }">
           <el-tag size="small" :type="eventTagType(row.event)">{{ row.event }}</el-tag>
         </template>

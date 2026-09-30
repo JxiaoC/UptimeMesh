@@ -872,7 +872,7 @@ async function resetTemplate() {
               <el-input-number v-model="settings.resultRetentionDays" :min="1" :max="365" />
               <el-button style="margin-left:12px" type="primary" plain
                 :loading="savingDays" @click="saveDays">{{ t('common.save') }}</el-button>
-              <p style="color:#909399;font-size:12px;margin:6px 0 0">
+              <p class="field-help">
                 {{ t('settings.retention.help', { days: settings.hourlyStatsRetentionDays }) }}
               </p>
             </div>
@@ -886,7 +886,7 @@ async function resetTemplate() {
               />
               <el-button style="margin-left:12px" type="primary" plain
                 :loading="savingStrip" @click="saveStatusStrip">{{ t('common.save') }}</el-button>
-              <p style="color:#909399;font-size:12px;margin:6px 0 0">
+              <p class="field-help">
                 {{ t('settings.stripRounds.help', {
                   min: settings.statusStripMin,
                   max: settings.statusStripMax,
@@ -905,7 +905,7 @@ async function resetTemplate() {
               />
               <el-button style="margin-left:12px" type="primary" plain
                 :loading="savingAgentNotify" @click="saveAgentOfflineNotify">{{ t('common.save') }}</el-button>
-              <p style="color:#909399;font-size:12px;margin:6px 0 0">
+              <p class="field-help">
                 {{ t('settings.agentOfflineNotify.help', { max: settings.agentOfflineNotifyMax }) }}
               </p>
             </div>
@@ -930,13 +930,13 @@ async function resetTemplate() {
                   {{ t('settings.key.rotate') }}
                 </el-button>
               </div>
-              <p style="color:#909399;font-size:12px;margin:6px 0 0">
+              <p class="field-help">
                 {{ t('settings.key.help') }}
               </p>
             </div>
           </el-form-item>
         </el-form>
-        <p style="color:#909399;font-size:12px;max-width:560px;margin-top:8px">
+        <p style="color:#909399;font-size:12px;max-width:560px;margin-top:8px;line-height:1.6">
           {{ t('settings.misc.help') }}
         </p>
       </el-tab-pane>
