@@ -438,8 +438,39 @@ func (r *RoundLite) AvgSpeedKbps() float64 {
 	return r.SpeedSumKbps / float64(r.SpeedCount)
 }
 
+// stripRoundQuery 取**单个**监控最近 limit 个已定稿轮次的语句(状态条用)。
+//
+// 为什么是"每个监控一条"而不是一条窗口函数大查询 —— 这里有一个实测到的性能陷阱:
+//
+//	ROW_NUMBER() OVER (PARTITION BY monitor_id ORDER BY scheduled_at DESC) 要求 SQLite
+//	把**每个分区算完**才能对外层出结果,而外层还有 WHERE rn<=? 与 ORDER BY。
+//	于是"只要最近 50 格"退化成"每个监控都要把保留期内全部轮次的索引项走一遍"。
+//	读放大 = 每监控轮次数 ÷ 要的格数(31 天 60 秒周期就是 44640 ÷ 50 ≈ 900 倍)。
+//
+// 实测(165 监控 × 44640 轮 = 736 万轮,与线上 10.2GB 库同规模,且与线上一样从未 ANALYZE):
+//
+//	现状(窗口函数):25 个监控一块要 13~23 秒;整批 165 个监控 1 分 48 秒。
+//	本语句         :25 个监控合计 9 毫秒;165 个监控 36 毫秒 —— 快约 1600 倍。
+//
+// 本语句让优化器直接用 idx_rounds_monitor_scheduled 做反向索引扫描并在 LIMIT 处
+// **提前停止**(EXPLAIN QUERY PLAN 只有一条 `SEARCH rounds USING INDEX`,
+// 没有 CO-ROUTINE / SCAN),读取量从「每监控 44640 行」降到「每监控 50 行」。
+// 代价是 N 次查询而不是 1 次,但实测 165 次合计 36ms,比一次大查询便宜三个数量级。
+//
+// rowid DESC 兜底与 ListRoundsByMonitor 同口径:同一秒内可能有多轮(外部上报连续到达),
+// 只按 scheduled_at DESC 时并列名次是未定义的,补 rowid 让"取哪 50 格"稳定可复现
+// (前端 mergeStrip 按 scheduledAt 归并,顺序漂移会让色块看起来在抖)。
+const stripRoundQuery = `SELECT state, success_rate, scheduled_at, speed_sum_kbps, speed_count
+	FROM rounds WHERE monitor_id=? AND state<>? ORDER BY scheduled_at DESC, rowid DESC LIMIT ?`
+
 // ListRecentRoundsByMonitors 批量取每个监控最近 limit 个已定稿轮次(OPEN 除外),
-// 时间升序返回(最老在前)。列表页状态条专用:一次查询避免每监控一次查询的 N+1。
+// 时间升序返回(最老在前)。列表页状态条专用。
+//
+// 实现说明见 stripRoundQuery:这里是逐监控查(每条走索引反查 + LIMIT 提前停止),
+// 而不是一条 ROW_NUMBER() 窗口函数 —— 后者在保留期长、轮次多的库上是实打实的慢查询
+// (线上表现为"第一次进监控页面,最近状态要等接近 10 秒,有时更久")。
+// 语句只 Prepare 一次、循环复用,避免 N 次解析开销。
+//
 // limit 由调用方按后台设置「最近状态格数」给定(见 Store.StatusStripRounds);
 // 越界或未给时回落默认格数,与列表接口缺省口径一致。
 func (s *Store) ListRecentRoundsByMonitors(ctx context.Context, monitorIDs []ID,
@@ -451,39 +482,48 @@ func (s *Store) ListRecentRoundsByMonitors(ctx context.Context, monitorIDs []ID,
 	if limit <= 0 || limit > MaxStatusStripRounds {
 		limit = DefaultStatusStripRounds
 	}
-	// 占位符顺序与 SQL 一致:state、各 monitor_id、limit。
-	args := make([]any, 0, len(monitorIDs)+2)
-	args = append(args, RoundStateOpen)
-	for _, id := range monitorIDs {
-		args = append(args, id.Hex())
+	stmt, err := s.dbRead.PrepareContext(ctx, stripRoundQuery)
+	if err != nil {
+		return nil, normalizeErr(err)
 	}
-	args = append(args, limit)
-	rows, err := s.dbRead.QueryContext(ctx, `SELECT monitor_id, state, success_rate, scheduled_at,
-			speed_sum_kbps, speed_count FROM (
-			SELECT monitor_id, state, success_rate, scheduled_at, speed_sum_kbps, speed_count,
-				ROW_NUMBER() OVER (PARTITION BY monitor_id ORDER BY scheduled_at DESC) AS rn
-			FROM rounds WHERE state<>? AND monitor_id IN (`+inPlaceholders(len(monitorIDs))+`)
-		) WHERE rn <= ? ORDER BY monitor_id, scheduled_at ASC`,
-		args...)
+	defer stmt.Close()
+	for _, id := range monitorIDs {
+		// 查出来是「最新在前」,下面反转成时间升序 —— 状态条要从最老一格开始重放
+		// 告警状态机(见 api.roundStatusStrip),方向不能反。
+		list, err := scanRecentRounds(ctx, stmt, id, limit)
+		if err != nil {
+			return nil, err
+		}
+		for i, j := 0, len(list)-1; i < j; i, j = i+1, j-1 {
+			list[i], list[j] = list[j], list[i]
+		}
+		out[id.Hex()] = list
+	}
+	return out, nil
+}
+
+// scanRecentRounds 跑一次状态条查询并返回「最新在前」的轮次列表。
+func scanRecentRounds(ctx context.Context, stmt *sql.Stmt, monitorID ID,
+	limit int) ([]*RoundLite, error) {
+	rows, err := stmt.QueryContext(ctx, monitorID.Hex(), RoundStateOpen, limit)
 	if err != nil {
 		return nil, normalizeErr(err)
 	}
 	defer rows.Close()
+	list := make([]*RoundLite, 0, limit)
 	for rows.Next() {
 		var (
-			monitorID ID
 			item      RoundLite
 			scheduled int64
 		)
-		if err = rows.Scan(&monitorID, &item.State, &item.SuccessRate, &scheduled,
+		if err = rows.Scan(&item.State, &item.SuccessRate, &scheduled,
 			&item.SpeedSumKbps, &item.SpeedCount); err != nil {
 			return nil, normalizeErr(err)
 		}
 		item.ScheduledAt = fromUnixSec(scheduled)
-		key := monitorID.Hex()
-		out[key] = append(out[key], &item)
+		list = append(list, &item)
 	}
-	return out, normalizeErr(rows.Err())
+	return list, normalizeErr(rows.Err())
 }
 
 // FindResultsByRound 一轮内各节点的回传结果。
